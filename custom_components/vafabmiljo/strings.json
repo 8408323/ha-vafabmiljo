@@ -1,0 +1,51 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "description": "Search for your address (VafabMiljö's pickup calendar works without logging in).",
+        "data": {
+          "query": "Address"
+        }
+      },
+      "address": {
+        "description": "Choose your address from the matches.",
+        "data": {
+          "plant_id": "Address"
+        }
+      },
+      "bankid_start": {
+        "description": "Optionally connect your account via BankID to also get invoices and contract details.",
+        "data": {
+          "enable_bankid": "Connect with BankID"
+        }
+      },
+      "reauth_confirm": {
+        "description": "Your VafabMiljö BankID session expired. Sign in again to keep invoices and contract data updating."
+      }
+    },
+    "progress": {
+      "waiting_for_bankid": "Open the BankID app and scan this QR code:\n\n{qr_code}"
+    },
+    "error": {
+      "cannot_connect": "Failed to reach VafabMiljö. Please try again.",
+      "no_matches": "No address matched that search."
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "latest_invoice": {
+        "name": "Latest invoice"
+      }
+    },
+    "switch": {
+      "notification": {
+        "name": "{kind} notifications"
+      }
+    }
+  }
+}

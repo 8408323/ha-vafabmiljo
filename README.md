@@ -1,0 +1,37 @@
+# ha-vafabmiljo
+
+A Home Assistant custom integration for [VafabMiljö](https://vafabmiljo.se) (Swedish
+municipal waste collection - Västerås/Köping/Arboga area): next pickup dates per bin
+type, invoices, and waste-contract fees.
+
+Reverse-engineered from the official Android app (`se.vafab.app`) - none of this API is
+publicly documented. See the endpoint catalog in the codebase comments (`api.py`) for
+what was captured and what wasn't.
+
+## Setup
+
+1. Add the integration in HA (Settings → Devices & services → Add integration →
+   VafabMiljö).
+2. Search for and select your address. This works anonymously and immediately gives you
+   next-pickup-date sensors.
+3. Optionally connect your account via BankID (scan the QR shown in the setup dialog) to
+   also get invoice and waste-contract entities.
+
+## Known limitations
+
+- Address search downloads the backend's full nationwide address list once during setup
+  (that's genuinely how the official app does it too - there's no server-side query
+  filtering). Filtering happens locally.
+- BankID sessions expire after a period of inactivity; when that happens the integration
+  will ask you to reauthenticate via HA's usual reauth flow (needs another QR scan).
+- Order/complaint *submission* isn't implemented - only their read-only "available
+  actions" templates were ever captured, never an actual submit call, so we won't guess
+  at that wire format.
+- Customer/contact details (which include your personal number) are deliberately not
+  exposed as entities.
+
+## Development
+
+Traffic was captured with mitmproxy over ADB (WiFi), with Frida bypassing OkHttp
+certificate pinning on a rooted test device. Capture files are never committed (see
+`.gitignore`) since they contain personal data.

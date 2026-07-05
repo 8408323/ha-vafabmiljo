@@ -1,0 +1,13 @@
+{
+  "domain": "vafabmiljo",
+  "name": "VafabMiljö",
+  "codeowners": ["@8408323"],
+  "config_flow": true,
+  "documentation": "https://github.com/8408323/ha-vafabmiljo",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/8408323/ha-vafabmiljo/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

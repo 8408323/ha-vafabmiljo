@@ -1,0 +1,30 @@
+# Captured traffic - contains personal data (SSN, address, invoices) - never commit
+captures/
+*.flow
+*.pcap
+*.pcapng
+*.har
+mitmdump*.log
+frida*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editor
+.vscode/
+*.swp
+
+# Local AI session task tracking
+.todo
+plan.md
+
+# dotclaude runtime lock (never commit)
+.claude/scheduled_tasks.lock
