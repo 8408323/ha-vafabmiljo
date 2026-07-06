@@ -26,13 +26,20 @@ CONF_CITY = "city"
 CONF_PLANT_ID = "plant_id"  # opaque per-address identifier returned by next-pickup/search
 
 # Notification settings (POST /settings) this integration exposes as switches.
-# Maps switch key -> the JSON field name in the settings payload.
+# Maps switch key -> the JSON field name in the settings payload. These three
+# are exactly the toggles the app's own "Notisinställningar" screen exposes
+# ("Driftinformation"/"Avfallstömning"/"Nyheter") - the settings payload has
+# several other fields (sludge, missed, saved, bankid, gate, locations,
+# blocked, disabled) but those are account/device state, not user toggles.
 NOTIFICATION_SETTINGS = {
-    "garbage": "garbage",
-    "news": "news",
-    "deviation": "deviation",
-    "services": "services",
+    "status": "status",  # "Driftinformation" - operational/service disruption notices
+    "garbage": "garbage",  # "Avfallstömning" - pickup reminders
+    "news": "news",  # "Nyheter"
 }
+
+# The app's reminder-time picker ("Klockslag för påminnelsenotiser"), 30-minute
+# increments, sent as POST /settings {"time": "HH:MM"}.
+REMINDER_TIME_FIELD = "time"
 
 # A 202 {"status": "waiting"} response means the backend is still provisioning
 # the session after BankID login completes - poll until it turns into a 200.
