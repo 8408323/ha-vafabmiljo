@@ -79,6 +79,7 @@ class VafabMiljoInvoiceSensor(CoordinatorEntity[VafabMiljoCoordinator], SensorEn
 
     _attr_has_entity_name = True
     _attr_translation_key = "latest_invoice"
+    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_native_unit_of_measurement = "SEK"
 
     def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry) -> None:
@@ -114,7 +115,6 @@ class VafabMiljoContractFeeSensor(CoordinatorEntity[VafabMiljoCoordinator], Sens
     """A waste-collection contract's recurring fee (e.g. the fixed base charge)."""
 
     _attr_has_entity_name = True
-    _attr_native_unit_of_measurement = "SEK"
 
     def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry, contract: dict[str, Any]) -> None:
         super().__init__(coordinator)
@@ -122,6 +122,9 @@ class VafabMiljoContractFeeSensor(CoordinatorEntity[VafabMiljoCoordinator], Sens
         self._attr_name = contract.get("description", "").strip() or f"Contract {contract['id']}"
         self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_contract_{contract['id']}_fee"
         self._attr_device_info = _device_info(entry)
+        # A rate like "kr/år", not a plain currency amount - SensorDeviceClass.MONETARY
+        # requires an ISO 4217 currency unit, which this isn't.
+        self._attr_native_unit_of_measurement = contract.get("fee", {}).get("unit")
 
     def _contract(self) -> dict[str, Any] | None:
         contracts = (self.coordinator.data.sanitation or {}).get("contracts", [])

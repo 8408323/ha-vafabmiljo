@@ -168,9 +168,7 @@ class VafabMiljoClient:
 
     async def start_bankid_auth(self) -> dict[str, Any]:
         """Start a BankID login; returns the first QR (as base64 SVG) + autostart token."""
-        return await self._request(
-            "POST", "/authenticate/auth", json={"loginType": "private"}, allow_pending=False
-        )
+        return await self._request("POST", "/authenticate/auth", json={"loginType": "private"}, allow_pending=False)
 
     async def poll_bankid_status(self) -> dict[str, Any]:
         """One poll of the BankID login status. Caller drives the polling loop."""

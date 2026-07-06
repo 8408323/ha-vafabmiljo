@@ -8,6 +8,13 @@ Reverse-engineered from the official Android app (`se.vafab.app`) - none of this
 publicly documented. See the endpoint catalog in the codebase comments (`api.py`) for
 what was captured and what wasn't.
 
+## Installation
+
+Not (yet) in the HACS default store - it has no brand icon in
+[home-assistant/brands](https://github.com/home-assistant/brands), which HACS requires
+for default-store listing. Add it as a HACS custom repository instead
+(HACS → ⋮ → Custom repositories → this repo URL, category "Integration").
+
 ## Setup
 
 1. Add the integration in HA (Settings → Devices & services → Add integration →
@@ -35,3 +42,14 @@ what was captured and what wasn't.
 Traffic was captured with mitmproxy over ADB (WiFi), with Frida bypassing OkHttp
 certificate pinning on a rooted test device. Capture files are never committed (see
 `.gitignore`) since they contain personal data.
+
+The `homeassistant` PyPI package isn't a dependency here - tests stub the handful of HA
+symbols the integration actually imports (see `tests/conftest.py`) rather than pulling in
+the full HA test harness.
+
+```bash
+uv sync --dev
+uv run pytest tests/ --cov=custom_components/vafabmiljo --cov-report=term-missing
+uv run ruff check custom_components/ tests/
+uv run ruff format custom_components/ tests/
+```
