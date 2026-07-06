@@ -60,6 +60,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "bankid_connected": {
+        "name": "BankID anslutet"
+      }
+    },
     "sensor": {
       "latest_invoice": {
         "name": "Senaste faktura"
