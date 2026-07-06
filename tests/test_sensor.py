@@ -8,9 +8,12 @@ from unittest.mock import Mock
 from homeassistant.config_entries import ConfigEntry
 from vafabmiljo.coordinator import VafabMiljoData
 from vafabmiljo.sensor import (
+    VafabMiljoAvailableComplaintsSensor,
+    VafabMiljoAvailableOrdersSensor,
     VafabMiljoContractFeeSensor,
     VafabMiljoInvoiceSensor,
     VafabMiljoPickupSensor,
+    VafabMiljoPropertySensor,
     async_setup_entry,
 )
 
@@ -73,6 +76,58 @@ async def test_setup_skips_contract_sensor_without_a_fee():
     await async_setup_entry(hass=None, entry=entry, async_add_entities=added.extend)
 
     assert not any(isinstance(e, VafabMiljoContractFeeSensor) for e in added)
+
+
+async def test_setup_adds_property_sensor_when_properties_present():
+    entry = _entry()
+    entry.runtime_data = _coordinator(
+        VafabMiljoData(
+            pickups=[],
+            authenticated=True,
+            invoices={"data": []},
+            properties={"current": {"id": 1, "designation": "Testgatan 2:7"}},
+        )
+    )
+    added: list = []
+    await async_setup_entry(hass=None, entry=entry, async_add_entities=added.extend)
+
+    assert any(isinstance(e, VafabMiljoPropertySensor) for e in added)
+
+
+async def test_setup_adds_orders_and_complaints_sensors_when_available():
+    entry = _entry()
+    entry.runtime_data = _coordinator(
+        VafabMiljoData(
+            pickups=[],
+            authenticated=True,
+            invoices={"data": []},
+            parameters={"ordersAvailable": True, "complaintsAvailable": True},
+        )
+    )
+    added: list = []
+    await async_setup_entry(hass=None, entry=entry, async_add_entities=added.extend)
+
+    kinds = {type(e) for e in added}
+    assert VafabMiljoAvailableOrdersSensor in kinds
+    assert VafabMiljoAvailableComplaintsSensor in kinds
+
+
+async def test_setup_skips_orders_and_complaints_sensors_when_unavailable():
+    entry = _entry()
+    entry.runtime_data = _coordinator(
+        VafabMiljoData(
+            pickups=[],
+            authenticated=True,
+            invoices={"data": []},
+            parameters={"ordersAvailable": False, "complaintsAvailable": False},
+        )
+    )
+    added: list = []
+    await async_setup_entry(hass=None, entry=entry, async_add_entities=added.extend)
+
+    kinds = {type(e) for e in added}
+    assert VafabMiljoAvailableOrdersSensor not in kinds
+    assert VafabMiljoAvailableComplaintsSensor not in kinds
 
 
 def test_pickup_sensor_native_value():
@@ -144,3 +199,59 @@ def test_contract_fee_sensor_uses_contract_unit():
     assert sensor.native_value == 1916.62
     assert sensor._attr_native_unit_of_measurement == "kr/år"
     assert sensor.extra_state_attributes["type"] == "FAST AVGIFT"
+
+
+def test_property_sensor_reports_designation_and_attributes():
+    coordinator = _coordinator(
+        VafabMiljoData(
+            pickups=[],
+            authenticated=True,
+            properties={
+                "current": {
+                    "id": 1,
+                    "designation": "Testgatan 2:7",
+                    "zip": "72596",
+                    "services": ["RH"],
+                    "environment": "default",
+                }
+            },
+        )
+    )
+    sensor = VafabMiljoPropertySensor(coordinator, _entry())
+    assert sensor.native_value == "Testgatan 2:7"
+    assert sensor.extra_state_attributes == {"zip": "72596", "services": ["RH"], "environment": "default"}
+
+
+def test_property_sensor_handles_missing_properties():
+    coordinator = _coordinator(VafabMiljoData(pickups=[], authenticated=True, properties=None))
+    sensor = VafabMiljoPropertySensor(coordinator, _entry())
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes == {}
+
+
+def test_available_orders_sensor_reports_count_and_titles():
+    coordinator = _coordinator(
+        VafabMiljoData(
+            pickups=[],
+            authenticated=True,
+            properties={"current": {"id": 1}},
+            orders={"1": {"10": [{"id": 719, "title": "Budning"}]}},
+        )
+    )
+    sensor = VafabMiljoAvailableOrdersSensor(coordinator, _entry())
+    assert sensor.native_value == 1
+    assert sensor.extra_state_attributes == {"titles": ["Budning"]}
+
+
+def test_available_complaints_sensor_reports_count_and_descriptions():
+    coordinator = _coordinator(
+        VafabMiljoData(
+            pickups=[],
+            authenticated=True,
+            properties={"current": {"id": 1}},
+            complaints={"1": {"10": [{"description": "Utebliven hämtning"}]}},
+        )
+    )
+    sensor = VafabMiljoAvailableComplaintsSensor(coordinator, _entry())
+    assert sensor.native_value == 1
+    assert sensor.extra_state_attributes == {"descriptions": ["Utebliven hämtning"]}

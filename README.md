@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration for [VafabMiljö](https://vafabmiljo.se) (Swedish
 municipal waste collection - Västerås/Köping/Arboga area): next pickup dates per bin
-type, invoices, and waste-contract fees.
+type, invoices, waste-contract fees, and (read-only) available order/complaint types.
 
 Reverse-engineered from the official Android app (`se.vafab.app`) - none of this API is
 publicly documented. See the endpoint catalog in the codebase comments (`api.py`) for
@@ -33,7 +33,8 @@ for default-store listing. Add it as a HACS custom repository instead
   will ask you to reauthenticate via HA's usual reauth flow (needs another QR scan).
 - Order/complaint *submission* isn't implemented - only their read-only "available
   actions" templates were ever captured, never an actual submit call, so we won't guess
-  at that wire format.
+  at that wire format. The "Available orders"/"Available complaints" sensors just report
+  what request types exist, not anything you can act on yet.
 - Customer/contact details (which include your personal number) are deliberately not
   exposed as entities.
 
