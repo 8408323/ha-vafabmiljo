@@ -37,9 +37,10 @@ Available in English and Swedish, matching HA's own language setting.
 
 ## Known limitations
 
-- Address search downloads the backend's full nationwide address list once during setup
-  (that's genuinely how the official app does it too - there's no server-side query
-  filtering). Filtering happens locally.
+- Address search is server-side (`?address=<query>`) - the backend currently throws a SQL
+  error if that parameter is missing entirely (it tries to join against every address
+  nationwide and overflows a prepared-statement placeholder limit), so a search always
+  needs at least one real character typed.
 - BankID sessions expire after a period of inactivity; when that happens the integration
   will ask you to reauthenticate via HA's usual reauth flow (needs another QR scan).
 - Order/complaint *submission* isn't implemented - only their read-only "available

@@ -59,7 +59,6 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         self._device_uuid: str = ""
         self._device_bearer: str = ""
         self._client: VafabMiljoClient | None = None
-        self._addresses: list[dict[str, Any]] = []
         self._matches: list[dict[str, Any]] = []
         self._selected: dict[str, Any] = {}
         self._qr_svg: str = ""
@@ -73,12 +72,10 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             self._client = VafabMiljoClient(session, self._device_uuid, self._device_bearer)
             try:
                 await self._client.register(model="Home Assistant", os_version="n/a")
-                self._addresses = await self._client.fetch_all_addresses()
+                self._matches = (await self._client.search_addresses(user_input["query"].strip()))[:25]
             except VafabMiljoError:
                 errors["base"] = "cannot_connect"
             else:
-                query = user_input["query"].strip().lower()
-                self._matches = [a for a in self._addresses if query in f"{a['address']} {a['city']}".lower()][:25]
                 if not self._matches:
                     errors["base"] = "no_matches"
                 else:
@@ -214,12 +211,10 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         if user_input is not None:
             try:
-                self._addresses = await self._client.fetch_all_addresses()
+                self._matches = (await self._client.search_addresses(user_input["query"].strip()))[:25]
             except VafabMiljoError:
                 errors["base"] = "cannot_connect"
             else:
-                query = user_input["query"].strip().lower()
-                self._matches = [a for a in self._addresses if query in f"{a['address']} {a['city']}".lower()][:25]
                 if not self._matches:
                     errors["base"] = "no_matches"
                 else:
