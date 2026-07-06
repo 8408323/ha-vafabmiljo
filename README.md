@@ -8,6 +8,13 @@ Reverse-engineered from the official Android app (`se.vafab.app`) - none of this
 publicly documented. See the endpoint catalog in the codebase comments (`api.py`) for
 what was captured and what wasn't.
 
+## Installation
+
+Not (yet) in the HACS default store - it has no brand icon in
+[home-assistant/brands](https://github.com/home-assistant/brands), which HACS requires
+for default-store listing. Add it as a HACS custom repository instead
+(HACS → ⋮ → Custom repositories → this repo URL, category "Integration").
+
 ## Setup
 
 1. Add the integration in HA (Settings → Devices & services → Add integration →
