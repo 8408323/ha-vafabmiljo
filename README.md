@@ -24,7 +24,7 @@ for default-store listing. Add it as a HACS custom repository instead
 3. Optionally connect your account via BankID (scan the QR shown in the setup dialog) to
    also get invoice, waste-contract, and notification-preference entities (matching the
    app's own "Driftinformation"/"Avfallstömning"/"Nyheter" toggles and reminder-time
-   picker).
+   picker), plus a diagnostic "BankID connected" sensor.
 4. Have more than one VafabMiljö property/address? Just repeat setup for each one - a
    second entry for a different address is fine. Adding the *same* address twice is
    blocked. Moved, or picked the wrong address? Reconfigure the entry (⋮ → Reconfigure)

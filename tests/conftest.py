@@ -30,6 +30,7 @@ def _install_stub_homeassistant() -> None:
     const = types.ModuleType("homeassistant.const")
 
     class Platform(str, enum.Enum):
+        BINARY_SENSOR = "binary_sensor"
         SENSOR = "sensor"
         SWITCH = "switch"
         TIME = "time"
@@ -274,6 +275,18 @@ def _install_stub_homeassistant() -> None:
     # -- homeassistant.components.* ----------------------------------------------
     components = types.ModuleType("homeassistant.components")
     sys.modules["homeassistant.components"] = components
+
+    binary_sensor_mod = types.ModuleType("homeassistant.components.binary_sensor")
+
+    class BinarySensorDeviceClass(str, enum.Enum):
+        CONNECTIVITY = "connectivity"
+
+    class BinarySensorEntity:
+        pass
+
+    binary_sensor_mod.BinarySensorDeviceClass = BinarySensorDeviceClass
+    binary_sensor_mod.BinarySensorEntity = BinarySensorEntity
+    sys.modules["homeassistant.components.binary_sensor"] = binary_sensor_mod
 
     sensor_mod = types.ModuleType("homeassistant.components.sensor")
 
