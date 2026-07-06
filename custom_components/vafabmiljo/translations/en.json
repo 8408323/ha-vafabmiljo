@@ -52,8 +52,19 @@
       }
     },
     "switch": {
-      "notification": {
-        "name": "{kind} notifications"
+      "notify_status": {
+        "name": "Operational information notifications"
+      },
+      "notify_garbage": {
+        "name": "Waste pickup notifications"
+      },
+      "notify_news": {
+        "name": "News notifications"
+      }
+    },
+    "time": {
+      "reminder_time": {
+        "name": "Reminder time"
       }
     }
   }

@@ -32,6 +32,7 @@ def _install_stub_homeassistant() -> None:
     class Platform(str, enum.Enum):
         SENSOR = "sensor"
         SWITCH = "switch"
+        TIME = "time"
 
     class EntityCategory(str, enum.Enum):
         DIAGNOSTIC = "diagnostic"
@@ -286,6 +287,18 @@ def _install_stub_homeassistant() -> None:
 
     switch_mod.SwitchEntity = SwitchEntity
     sys.modules["homeassistant.components.switch"] = switch_mod
+
+    time_mod = types.ModuleType("homeassistant.components.time")
+
+    class TimeEntity:
+        _attr_native_value = None
+
+        @property
+        def native_value(self):
+            return self._attr_native_value
+
+    time_mod.TimeEntity = TimeEntity
+    sys.modules["homeassistant.components.time"] = time_mod
 
     diagnostics_mod = types.ModuleType("homeassistant.components.diagnostics")
     REDACTED = "**REDACTED**"

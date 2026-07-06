@@ -22,7 +22,9 @@ for default-store listing. Add it as a HACS custom repository instead
 2. Search for and select your address. This works anonymously and immediately gives you
    next-pickup-date sensors.
 3. Optionally connect your account via BankID (scan the QR shown in the setup dialog) to
-   also get invoice and waste-contract entities.
+   also get invoice, waste-contract, and notification-preference entities (matching the
+   app's own "Driftinformation"/"Avfallstömning"/"Nyheter" toggles and reminder-time
+   picker).
 
 ## Known limitations
 
