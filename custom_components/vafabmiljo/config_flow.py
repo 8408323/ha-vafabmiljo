@@ -92,7 +92,10 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_address(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             self._selected = next(a for a in self._matches if a["plant_id"] == user_input[CONF_PLANT_ID])
-            await self.async_set_unique_id(self._device_uuid)
+            # Keyed on the address, not the (freshly generated, always-unique)
+            # device_uuid, so adding the same address twice is what gets blocked -
+            # different addresses/properties are meant to coexist as separate entries.
+            await self.async_set_unique_id(self._selected["plant_id"])
             self._abort_if_unique_id_configured()
             return await self.async_step_bankid_start()
         options = [{"value": a["plant_id"], "label": f"{a['address']}, {a['city']}"} for a in self._matches]
@@ -195,3 +198,56 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             data_updates={CONF_SESSION_COOKIE: self._client.session_cookie},
             reason="reauth_successful",
         )
+
+    # -- Reconfigure: change the bound address without removing the entry -----
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        if self._client is None:
+            session = async_get_clientsession(self.hass)
+            self._client = VafabMiljoClient(
+                session,
+                entry.data[CONF_DEVICE_UUID],
+                entry.data[CONF_DEVICE_BEARER],
+                entry.data.get(CONF_SESSION_COOKIE),
+            )
+        if user_input is not None:
+            try:
+                self._addresses = await self._client.fetch_all_addresses()
+            except VafabMiljoError:
+                errors["base"] = "cannot_connect"
+            else:
+                query = user_input["query"].strip().lower()
+                self._matches = [a for a in self._addresses if query in f"{a['address']} {a['city']}".lower()][:25]
+                if not self._matches:
+                    errors["base"] = "no_matches"
+                else:
+                    return await self.async_step_reconfigure_address()
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema({vol.Required("query"): str}),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure_address(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        assert self._client is not None
+        if user_input is not None:
+            selected = next(a for a in self._matches if a["plant_id"] == user_input[CONF_PLANT_ID])
+            await self.async_set_unique_id(selected["plant_id"])
+            # A different entry already at this address blocks the switch; this
+            # entry's own current unique_id is ignored while reconfiguring it.
+            self._abort_if_unique_id_configured()
+            await self._client.set_address(selected["plant_id"])
+            return self.async_update_reload_and_abort(
+                self._get_reconfigure_entry(),
+                data_updates={
+                    CONF_ADDRESS: selected["address"],
+                    CONF_CITY: selected["city"],
+                    CONF_PLANT_ID: selected["plant_id"],
+                },
+                reason="reconfigure_successful",
+            )
+        options = [{"value": a["plant_id"], "label": f"{a['address']}, {a['city']}"} for a in self._matches]
+        schema = vol.Schema({vol.Required(CONF_PLANT_ID): SelectSelector(SelectSelectorConfig(options=options))})
+        return self.async_show_form(step_id="reconfigure_address", data_schema=schema)
