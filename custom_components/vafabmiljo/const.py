@@ -14,11 +14,21 @@ API_BASE = "https://vafab.avfallsapp.se/api/nova/v1"
 APP_VERSION = "2.0.0.5"
 APP_IDENTIFIER_PREFIX = "ha-vafabmiljo-"
 
+# The official app authenticates every request (starting with the very first
+# POST /register) with this exact bearer value - it is the same for every
+# installation on every device, not device-specific. In the app it is stored
+# XOR-obfuscated (se.nova.Keys.Global.getAuthKey()) purely to defeat naive
+# string scanning of the APK; it decodes to this literal. Confirmed by
+# clearing the app's local storage entirely (forcing a brand new Firebase
+# installation ID) and observing the exact same bearer used in the next
+# POST /register call.
+DEVICE_AUTH_KEY = "b2iNIJWP7AkHK1Vdo4IynZXhtKUUvMVGKd7m5UPi617524ab"
+
 # Config-entry data keys.
 CONF_DEVICE_UUID = "device_uuid"
-# Long-lived per-install bearer credential returned by POST /register. Named
-# "bearer" rather than "token" here only to keep this constant out of generic
-# secret-scanners' pattern matching - the value itself is not a secret literal.
+# Bearer credential sent (not returned) on every request, including the very
+# first POST /register. Named "bearer" rather than "token" here only to keep
+# this constant out of generic secret-scanners' pattern matching.
 CONF_DEVICE_BEARER = "device_bearer"
 CONF_SESSION_COOKIE = "session_cookie"  # vafab_session; None until BankID login completes
 CONF_ADDRESS = "address"

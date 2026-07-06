@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import secrets
 import uuid
 from typing import Any
 
@@ -31,16 +30,11 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SESSION_COOKIE,
     DEFAULT_SCAN_INTERVAL_MINUTES,
+    DEVICE_AUTH_KEY,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _new_device_bearer() -> str:
-    # The app self-assigns this on first contact rather than receiving one back
-    # from /register (see api.py) - any sufficiently random opaque string works.
-    return secrets.token_urlsafe(36)
 
 
 def _qr_markdown(svg: str) -> str:
@@ -74,7 +68,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             self._device_uuid = str(uuid.uuid4()).replace("-", "")
-            self._device_bearer = _new_device_bearer()
+            self._device_bearer = DEVICE_AUTH_KEY
             session = async_get_clientsession(self.hass)
             self._client = VafabMiljoClient(session, self._device_uuid, self._device_bearer)
             try:

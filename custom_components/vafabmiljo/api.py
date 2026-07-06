@@ -113,11 +113,11 @@ class VafabMiljoClient:
     async def register(self, model: str, os_version: str) -> None:
         """Register this device.
 
-        The bearer credential is *not* issued by this call - the client picks
-        its own opaque value up front (see config_flow) and sends it as the
-        Authorization header on this very first request; the backend just
-        starts associating that value with this device_uuid from here on.
-        The response's own "token" field is null in practice.
+        The bearer credential is *not* issued by this call - it's a fixed
+        app-wide value (DEVICE_AUTH_KEY, see const.py) sent as the
+        Authorization header on this very first request; the backend
+        associates it with this device_uuid from here on. The response's
+        own "token" field is null in practice.
         """
         if not self._device_bearer:
             raise VafabMiljoError("device_bearer must be set before calling register()")
