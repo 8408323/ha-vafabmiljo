@@ -138,14 +138,17 @@ class VafabMiljoClient:
 
     # -- Address / pickup schedule (no login required) ----------------------
 
-    async def fetch_all_addresses(self) -> list[dict[str, Any]]:
-        """Fetch the full nationwide address/plant dataset.
+    async def search_addresses(self, query: str) -> list[dict[str, Any]]:
+        """Search for addresses matching query, server-side.
 
-        There's no server-side query filtering - the endpoint always returns
-        every address grouped by city (hundreds of KB), and the app filters
-        client-side as the user types. We do the same in the config flow.
+        The endpoint requires an `address` query param - calling it with none
+        makes the backend try to join against its entire nationwide plant_id
+        dataset, which currently overflows MySQL's prepared-statement
+        placeholder limit (SQLSTATE[HY000] 1390) and fails every time. This
+        isn't specific to our client: the official app's own address search
+        hits the same crash if you watch its raw traffic without a filter.
         """
-        data = await self._request("GET", "/next-pickup/search", allow_pending=False)
+        data = await self._request("GET", "/next-pickup/search", params={"address": query}, allow_pending=False)
         addresses: list[dict[str, Any]] = []
         for city, entries in data.items():
             for entry in entries:

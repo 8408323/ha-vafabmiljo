@@ -48,7 +48,7 @@ def mock_client(monkeypatch):
 
 
 async def test_user_step_no_matches_shows_error(hass, mock_client):
-    mock_client.fetch_all_addresses.return_value = [{"address": "Storgatan 1", "city": "Teststad", "plant_id": "p1"}]
+    mock_client.search_addresses.return_value = []
     flow = _make_flow(hass)
 
     result = await flow.async_step_user({"query": "nonexistent street"})
@@ -59,9 +59,10 @@ async def test_user_step_no_matches_shows_error(hass, mock_client):
 
 
 async def test_user_step_match_moves_to_address_select(hass, mock_client):
-    mock_client.fetch_all_addresses.return_value = [
+    # Filtering happens server-side (see api.search_addresses) - the mock here
+    # returns exactly what the backend would for this query.
+    mock_client.search_addresses.return_value = [
         {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"},
-        {"address": "Storgatan 1", "city": "Teststad", "plant_id": "p2"},
     ]
     flow = _make_flow(hass)
 
@@ -69,6 +70,7 @@ async def test_user_step_match_moves_to_address_select(hass, mock_client):
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "address"
+    mock_client.search_addresses.assert_awaited_once_with("testgatan")
     assert len(flow._matches) == 1
     assert flow._matches[0]["plant_id"] == "p1"
 
@@ -218,7 +220,7 @@ async def test_reauth_bankid_wait_auth_error_reprompts(hass, mock_client):
 
 
 async def test_reconfigure_no_matches_shows_error(hass, mock_client):
-    mock_client.fetch_all_addresses.return_value = [{"address": "Storgatan 1", "city": "Teststad", "plant_id": "p1"}]
+    mock_client.search_addresses.return_value = []
     flow = _make_flow(hass)
     flow._reconfigure_entry = ConfigEntry(
         data={"device_uuid": "dev1", "device_bearer": "bearer1", "session_cookie": "old-cookie"}
@@ -232,7 +234,7 @@ async def test_reconfigure_no_matches_shows_error(hass, mock_client):
 
 
 async def test_reconfigure_register_failure_shows_cannot_connect(hass, mock_client):
-    mock_client.fetch_all_addresses.side_effect = VafabMiljoError("boom")
+    mock_client.search_addresses.side_effect = VafabMiljoError("boom")
     flow = _make_flow(hass)
     flow._reconfigure_entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
 
@@ -243,7 +245,7 @@ async def test_reconfigure_register_failure_shows_cannot_connect(hass, mock_clie
 
 
 async def test_reconfigure_match_moves_to_address_select(hass, mock_client):
-    mock_client.fetch_all_addresses.return_value = [
+    mock_client.search_addresses.return_value = [
         {"address": "Nygatan 5", "city": "Teststad", "plant_id": "p2"},
     ]
     flow = _make_flow(hass)

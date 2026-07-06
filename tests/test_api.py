@@ -92,16 +92,16 @@ async def test_session_cookie_is_remembered(client: VafabMiljoClient):
         assert client.session_cookie == "abc123"
 
 
-async def test_fetch_all_addresses_flattens_city_grouping(client: VafabMiljoClient):
+async def test_search_addresses_flattens_city_grouping(client: VafabMiljoClient):
     with aioresponses() as mocked:
         mocked.get(
-            f"{API_BASE}/next-pickup/search",
+            f"{API_BASE}/next-pickup/search?address=Testgatan",
             payload={
                 "Arboga": [{"address": "Österby 257", "plant_id": "p1"}],
                 "Teststad": [{"address": "Testgatan 1", "plant_id": "p2"}],
             },
         )
-        addresses = await client.fetch_all_addresses()
+        addresses = await client.search_addresses("Testgatan")
         assert {"address": "Österby 257", "plant_id": "p1", "city": "Arboga"} in addresses
         assert {"address": "Testgatan 1", "plant_id": "p2", "city": "Teststad"} in addresses
 
