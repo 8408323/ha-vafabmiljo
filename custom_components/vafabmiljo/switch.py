@@ -27,8 +27,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     if not coordinator.data.authenticated:
         return
     async_add_entities(
-        VafabMiljoNotificationSwitch(coordinator, entry, key, field)
-        for key, field in NOTIFICATION_SETTINGS.items()
+        VafabMiljoNotificationSwitch(coordinator, entry, key, field) for key, field in NOTIFICATION_SETTINGS.items()
     )
 
 

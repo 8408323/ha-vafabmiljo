@@ -35,3 +35,14 @@ what was captured and what wasn't.
 Traffic was captured with mitmproxy over ADB (WiFi), with Frida bypassing OkHttp
 certificate pinning on a rooted test device. Capture files are never committed (see
 `.gitignore`) since they contain personal data.
+
+The `homeassistant` PyPI package isn't a dependency here - tests stub the handful of HA
+symbols the integration actually imports (see `tests/conftest.py`) rather than pulling in
+the full HA test harness.
+
+```bash
+uv sync --dev
+uv run pytest tests/ --cov=custom_components/vafabmiljo --cov-report=term-missing
+uv run ruff check custom_components/ tests/
+uv run ruff format custom_components/ tests/
+```
