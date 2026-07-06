@@ -1,0 +1,39 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "bankid_connected": {
+        "default": "mdi:card-account-details-outline"
+      }
+    },
+    "sensor": {
+      "latest_invoice": {
+        "default": "mdi:receipt-text-outline"
+      },
+      "property": {
+        "default": "mdi:home-city-outline"
+      },
+      "available_orders": {
+        "default": "mdi:truck-delivery-outline"
+      },
+      "available_complaints": {
+        "default": "mdi:alert-circle-outline"
+      }
+    },
+    "switch": {
+      "notify_status": {
+        "default": "mdi:information-outline"
+      },
+      "notify_garbage": {
+        "default": "mdi:trash-can-outline"
+      },
+      "notify_news": {
+        "default": "mdi:newspaper-variant-outline"
+      }
+    },
+    "time": {
+      "reminder_time": {
+        "default": "mdi:clock-alert-outline"
+      }
+    }
+  }
+}

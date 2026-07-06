@@ -65,6 +65,9 @@ class VafabMiljoPickupSensor(CoordinatorEntity[VafabMiljoCoordinator], SensorEnt
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DATE
+    # icons.json only covers translation_key-based entities; this one's name is
+    # dynamic (the bin type itself), so the icon is set directly instead.
+    _attr_icon = "mdi:trash-can-outline"
 
     def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry, bin_type: str) -> None:
         super().__init__(coordinator)
