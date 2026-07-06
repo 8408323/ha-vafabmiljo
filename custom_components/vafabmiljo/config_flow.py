@@ -78,9 +78,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             else:
                 query = user_input["query"].strip().lower()
-                self._matches = [
-                    a for a in self._addresses if query in f"{a['address']} {a['city']}".lower()
-                ][:25]
+                self._matches = [a for a in self._addresses if query in f"{a['address']} {a['city']}".lower()][:25]
                 if not self._matches:
                     errors["base"] = "no_matches"
                 else:
@@ -93,15 +91,11 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_address(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            self._selected = next(
-                a for a in self._matches if a["plant_id"] == user_input[CONF_PLANT_ID]
-            )
+            self._selected = next(a for a in self._matches if a["plant_id"] == user_input[CONF_PLANT_ID])
             await self.async_set_unique_id(self._device_uuid)
             self._abort_if_unique_id_configured()
             return await self.async_step_bankid_start()
-        options = [
-            {"value": a["plant_id"], "label": f"{a['address']}, {a['city']}"} for a in self._matches
-        ]
+        options = [{"value": a["plant_id"], "label": f"{a['address']}, {a['city']}"} for a in self._matches]
         schema = vol.Schema({vol.Required(CONF_PLANT_ID): SelectSelector(SelectSelectorConfig(options=options))})
         return self.async_show_form(step_id="address", data_schema=schema)
 
@@ -134,7 +128,11 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_bankid_failed(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return self.async_show_form(step_id="bankid_start", data_schema=vol.Schema({vol.Optional("enable_bankid", default=True): bool}), errors={"base": "cannot_connect"})
+        return self.async_show_form(
+            step_id="bankid_start",
+            data_schema=vol.Schema({vol.Optional("enable_bankid", default=True): bool}),
+            errors={"base": "cannot_connect"},
+        )
 
     async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self._create_entry()
