@@ -35,13 +35,12 @@ class VafabMiljoNotificationSwitch(SwitchEntity, RestoreEntity):
     """One notification-type toggle (garbage pickup, news, ...)."""
 
     _attr_has_entity_name = True
-    _attr_translation_key = "notification"
     _attr_assumed_state = True
 
     def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry, key: str, field: str) -> None:
         self._coordinator = coordinator
         self._field = field
-        self._attr_translation_placeholders = {"kind": key}
+        self._attr_translation_key = f"notify_{key}"
         self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_notify_{key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.data[CONF_PLANT_ID])},
