@@ -13,6 +13,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -43,6 +44,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         for contract in (coordinator.data.sanitation or {}).get("contracts", []):
             if contract.get("fee", {}).get("price"):
                 entities.append(VafabMiljoContractFeeSensor(coordinator, entry, contract))
+        if coordinator.data.properties:
+            entities.append(VafabMiljoPropertySensor(coordinator, entry))
+        if (coordinator.data.parameters or {}).get("ordersAvailable"):
+            entities.append(VafabMiljoAvailableOrdersSensor(coordinator, entry))
+        if (coordinator.data.parameters or {}).get("complaintsAvailable"):
+            entities.append(VafabMiljoAvailableComplaintsSensor(coordinator, entry))
 
     async_add_entities(entities)
 
@@ -145,3 +152,85 @@ class VafabMiljoContractFeeSensor(CoordinatorEntity[VafabMiljoCoordinator], Sens
             "pickups_per_year": contract.get("pickupsPerYear"),
             "unit": contract.get("fee", {}).get("unit"),
         }
+
+
+class VafabMiljoPropertySensor(CoordinatorEntity[VafabMiljoCoordinator], SensorEntity):
+    """The property (fastighetsbeteckning) this account/address is registered under."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "property"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_property"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def _current(self) -> dict[str, Any]:
+        return (self.coordinator.data.properties or {}).get("current", {})
+
+    @property
+    def native_value(self) -> str | None:
+        return self._current.get("designation")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        current = self._current
+        if not current:
+            return {}
+        return {
+            "zip": current.get("zip"),
+            "services": current.get("services"),
+            "environment": current.get("environment"),
+        }
+
+
+class VafabMiljoAvailableOrdersSensor(CoordinatorEntity[VafabMiljoCoordinator], SensorEntity):
+    """How many order types (e.g. bin-size changes, extra pickups) are available to request.
+
+    Informational only - the app's actual order *submission* endpoint was never
+    captured, so this integration can't place orders, only report what's offered.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "available_orders"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_available_orders"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.data.available_orders)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"titles": [o.get("title") for o in self.coordinator.data.available_orders]}
+
+
+class VafabMiljoAvailableComplaintsSensor(CoordinatorEntity[VafabMiljoCoordinator], SensorEntity):
+    """How many complaint types (e.g. missed pickup) are available to file.
+
+    Informational only - see VafabMiljoAvailableOrdersSensor for why submission
+    isn't implemented.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "available_complaints"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_available_complaints"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.data.available_complaints)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"descriptions": [c.get("description") for c in self.coordinator.data.available_complaints]}
