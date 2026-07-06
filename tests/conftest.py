@@ -33,7 +33,12 @@ def _install_stub_homeassistant() -> None:
         SENSOR = "sensor"
         SWITCH = "switch"
 
+    class EntityCategory(str, enum.Enum):
+        DIAGNOSTIC = "diagnostic"
+        CONFIG = "config"
+
     const.Platform = Platform
+    const.EntityCategory = EntityCategory
     sys.modules["homeassistant.const"] = const
 
     # -- homeassistant.core ----------------------------------------------------

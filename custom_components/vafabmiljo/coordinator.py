@@ -26,6 +26,30 @@ class VafabMiljoData:
     authenticated: bool = False
     invoices: dict[str, Any] | None = None
     sanitation: dict[str, Any] | None = None
+    properties: dict[str, Any] | None = None
+    parameters: dict[str, Any] | None = None
+    orders: dict[str, Any] | None = None
+    complaints: dict[str, Any] | None = None
+
+    @property
+    def current_property_id(self) -> int | None:
+        return (self.properties or {}).get("current", {}).get("id")
+
+    def _flatten_by_current_property(self, data: dict[str, Any] | None) -> list[dict[str, Any]]:
+        # orders/complaints are keyed "<property_id>": {"<contract_id>": [...]}
+        property_id = self.current_property_id
+        if not data or property_id is None:
+            return []
+        by_contract = data.get(str(property_id), {})
+        return [item for items in by_contract.values() for item in items]
+
+    @property
+    def available_orders(self) -> list[dict[str, Any]]:
+        return self._flatten_by_current_property(self.orders)
+
+    @property
+    def available_complaints(self) -> list[dict[str, Any]]:
+        return self._flatten_by_current_property(self.complaints)
 
 
 class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
@@ -53,6 +77,10 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         try:
             invoices = await self.client.get_invoices()
             sanitation = await self.client.get_sanitation()
+            properties = await self.client.get_properties()
+            parameters = await self.client.get_parameters()
+            orders = await self.client.get_orders() if parameters.get("ordersAvailable") else None
+            complaints = await self.client.get_complaints() if parameters.get("complaintsAvailable") else None
         except VafabMiljoAuthError as err:
             # The BankID session expired - only the account-linked entities are
             # affected, the pickup schedule above still works without login.
@@ -65,4 +93,8 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
             authenticated=True,
             invoices=invoices,
             sanitation=sanitation,
+            properties=properties,
+            parameters=parameters,
+            orders=orders,
+            complaints=complaints,
         )
