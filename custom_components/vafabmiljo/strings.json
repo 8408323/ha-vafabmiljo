@@ -22,6 +22,18 @@
       },
       "reauth_confirm": {
         "description": "Your VafabMiljö BankID session expired. Sign in again to keep invoices and contract data updating."
+      },
+      "reconfigure": {
+        "description": "Search for the new address to bind this entry to.",
+        "data": {
+          "query": "Address"
+        }
+      },
+      "reconfigure_address": {
+        "description": "Choose the new address from the matches.",
+        "data": {
+          "plant_id": "Address"
+        }
       }
     },
     "progress": {
@@ -33,7 +45,8 @@
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured%]",
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
     }
   },
   "entity": {

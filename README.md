@@ -25,6 +25,10 @@ for default-store listing. Add it as a HACS custom repository instead
    also get invoice, waste-contract, and notification-preference entities (matching the
    app's own "Driftinformation"/"Avfallstömning"/"Nyheter" toggles and reminder-time
    picker).
+4. Have more than one VafabMiljö property/address? Just repeat setup for each one - a
+   second entry for a different address is fine. Adding the *same* address twice is
+   blocked. Moved, or picked the wrong address? Reconfigure the entry (⋮ → Reconfigure)
+   instead of removing and re-adding it - your BankID login carries over.
 
 ## Known limitations
 

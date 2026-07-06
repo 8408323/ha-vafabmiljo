@@ -94,6 +94,7 @@ def _install_stub_homeassistant() -> None:
             self.context: dict[str, Any] = {}
             self.flow_id = "test_flow"
             self._reauth_entry: ConfigEntry | None = None
+            self._reconfigure_entry: ConfigEntry | None = None
             self._unique_id: str | None = None
 
         async def async_set_unique_id(self, unique_id: str) -> None:
@@ -105,6 +106,10 @@ def _install_stub_homeassistant() -> None:
         def _get_reauth_entry(self) -> ConfigEntry:
             assert self._reauth_entry is not None
             return self._reauth_entry
+
+        def _get_reconfigure_entry(self) -> ConfigEntry:
+            assert self._reconfigure_entry is not None
+            return self._reconfigure_entry
 
         def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None):
             return {
