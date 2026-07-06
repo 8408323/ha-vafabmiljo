@@ -76,6 +76,9 @@ async def test_address_step_selects_and_moves_to_bankid_start(hass, mock_client)
 
     assert flow._selected["address"] == "Testgatan 1"
     assert result["step_id"] == "bankid_start"
+    # Keyed on the address (plant_id), not device_uuid, so two entries for the
+    # same address collide but different addresses are free to coexist.
+    assert flow._unique_id == "p1"
 
 
 async def test_bankid_start_skip_creates_entry_directly(hass, mock_client):
@@ -207,6 +210,68 @@ async def test_reauth_bankid_wait_auth_error_reprompts(hass, mock_client):
     result = await flow.async_step_reauth_bankid_wait()
 
     assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "reauth_confirm"}
+
+
+async def test_reconfigure_no_matches_shows_error(hass, mock_client):
+    mock_client.fetch_all_addresses.return_value = [{"address": "Storgatan 1", "city": "Teststad", "plant_id": "p1"}]
+    flow = _make_flow(hass)
+    flow._reconfigure_entry = ConfigEntry(
+        data={"device_uuid": "dev1", "device_bearer": "bearer1", "session_cookie": "old-cookie"}
+    )
+
+    result = await flow.async_step_reconfigure({"query": "nonexistent street"})
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "no_matches"}
+
+
+async def test_reconfigure_register_failure_shows_cannot_connect(hass, mock_client):
+    mock_client.fetch_all_addresses.side_effect = VafabMiljoError("boom")
+    flow = _make_flow(hass)
+    flow._reconfigure_entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
+
+    result = await flow.async_step_reconfigure({"query": "anything"})
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_reconfigure_match_moves_to_address_select(hass, mock_client):
+    mock_client.fetch_all_addresses.return_value = [
+        {"address": "Nygatan 5", "city": "Teststad", "plant_id": "p2"},
+    ]
+    flow = _make_flow(hass)
+    flow._reconfigure_entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
+
+    result = await flow.async_step_reconfigure({"query": "nygatan"})
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure_address"
+    assert flow._matches[0]["plant_id"] == "p2"
+
+
+async def test_reconfigure_address_updates_entry_and_reloads(hass, mock_client):
+    entry = ConfigEntry(
+        data={
+            "device_uuid": "dev1",
+            "device_bearer": "bearer1",
+            "address": "Testgatan 1",
+            "city": "Teststad",
+            "plant_id": "p1",
+        }
+    )
+    flow = _make_flow(hass, mock_client)
+    flow._reconfigure_entry = entry
+    flow._matches = [{"address": "Nygatan 5", "city": "Teststad", "plant_id": "p2"}]
+
+    result = await flow.async_step_reconfigure_address({"plant_id": "p2"})
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data["address"] == "Nygatan 5"
+    assert entry.data["plant_id"] == "p2"
+    mock_client.set_address.assert_awaited_once_with("p2")
 
 
 def test_is_authenticated_handles_both_shapes():
