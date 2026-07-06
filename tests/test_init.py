@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from vafabmiljo import async_setup_entry, async_unload_entry
+from vafabmiljo import _async_reload_entry, async_setup_entry, async_unload_entry
 from vafabmiljo.const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE
 from vafabmiljo.coordinator import VafabMiljoCoordinator
 
@@ -38,6 +38,16 @@ async def test_setup_entry_creates_coordinator_and_forwards_platforms(monkeypatc
     assert result is True
     assert isinstance(entry.runtime_data, VafabMiljoCoordinator)
     hass.config_entries.async_forward_entry_setups.assert_awaited_once()
+    assert len(entry._unload_callbacks) == 1
+
+
+async def test_reload_entry_calls_hass_reload():
+    hass = _hass()
+    entry = _entry()
+
+    await _async_reload_entry(hass, entry)
+
+    hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
 
 
 async def test_unload_entry_delegates_to_hass():

@@ -49,4 +49,6 @@ PENDING_POLL_TIMEOUT = 30
 # BankID status poll cadence while a config flow waits for the user to scan.
 BANKID_POLL_INTERVAL = 2
 
-DEFAULT_SCAN_INTERVAL = 1800  # 30 minutes - this is a waste-collection calendar, not live data
+# Options-flow key: user-configurable poll interval, in minutes.
+CONF_SCAN_INTERVAL = "scan_interval"
+DEFAULT_SCAN_INTERVAL_MINUTES = 30  # this is a waste-collection calendar, not live data
