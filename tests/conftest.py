@@ -78,6 +78,13 @@ def _install_stub_homeassistant() -> None:
             self.options = options or {}
             self.entry_id = "test_entry"
             self.runtime_data: Any = None
+            self._unload_callbacks: list = []
+
+        def async_on_unload(self, func) -> None:
+            self._unload_callbacks.append(func)
+
+        def add_update_listener(self, func):
+            return func
 
     class FlowResultType(str, enum.Enum):
         FORM = "form"

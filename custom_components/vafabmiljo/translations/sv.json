@@ -1,0 +1,94 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "description": "Sök efter din adress (VafabMiljös hämtningskalender fungerar utan inloggning).",
+        "data": {
+          "query": "Adress"
+        }
+      },
+      "address": {
+        "description": "Välj din adress bland träffarna.",
+        "data": {
+          "plant_id": "Adress"
+        }
+      },
+      "bankid_start": {
+        "description": "Anslut valfritt ditt konto via BankID för att även få fakturor och avtalsdetaljer.",
+        "data": {
+          "enable_bankid": "Anslut med BankID"
+        }
+      },
+      "reauth_confirm": {
+        "description": "Din BankID-session hos VafabMiljö har gått ut. Logga in igen för att fortsätta få uppdaterade fakturor och avtalsdata."
+      },
+      "reconfigure": {
+        "description": "Sök efter den nya adressen att koppla till denna post.",
+        "data": {
+          "query": "Adress"
+        }
+      },
+      "reconfigure_address": {
+        "description": "Välj den nya adressen bland träffarna.",
+        "data": {
+          "plant_id": "Adress"
+        }
+      }
+    },
+    "progress": {
+      "waiting_for_bankid": "Öppna BankID-appen och skanna denna QR-kod:\n\n{qr_code}"
+    },
+    "error": {
+      "cannot_connect": "Det gick inte att nå VafabMiljö. Försök igen.",
+      "no_matches": "Ingen adress matchade sökningen."
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "description": "Det här är en tömningskalender, inte realtidsdata - standardvärdet 30 minuter räcker oftast gott.",
+        "data": {
+          "scan_interval": "Uppdateringsintervall (minuter)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "latest_invoice": {
+        "name": "Senaste faktura"
+      },
+      "property": {
+        "name": "Fastighet"
+      },
+      "available_orders": {
+        "name": "Tillgängliga beställningar"
+      },
+      "available_complaints": {
+        "name": "Tillgängliga reklamationer"
+      }
+    },
+    "switch": {
+      "notify_status": {
+        "name": "Driftinformation"
+      },
+      "notify_garbage": {
+        "name": "Avfallstömning"
+      },
+      "notify_news": {
+        "name": "Nyheter"
+      }
+    },
+    "time": {
+      "reminder_time": {
+        "name": "Påminnelsetid"
+      }
+    }
+  }
+}
