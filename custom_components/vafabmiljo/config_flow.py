@@ -17,7 +17,7 @@ import uuid
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig
 
@@ -28,7 +28,9 @@ from .const import (
     CONF_DEVICE_BEARER,
     CONF_DEVICE_UUID,
     CONF_PLANT_ID,
+    CONF_SCAN_INTERVAL,
     CONF_SESSION_COOKIE,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
 )
 
@@ -54,6 +56,10 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for VafabMiljö."""
 
     VERSION = 1
+
+    @staticmethod
+    def async_get_options_flow(config_entry: ConfigEntry) -> VafabMiljoOptionsFlow:
+        return VafabMiljoOptionsFlow(config_entry)
 
     def __init__(self) -> None:
         self._device_uuid: str = ""
@@ -251,3 +257,19 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         options = [{"value": a["plant_id"], "label": f"{a['address']}, {a['city']}"} for a in self._matches]
         schema = vol.Schema({vol.Required(CONF_PLANT_ID): SelectSelector(SelectSelectorConfig(options=options))})
         return self.async_show_form(step_id="reconfigure_address", data_schema=schema)
+
+
+class VafabMiljoOptionsFlow(OptionsFlow):
+    """Let the user override how often the coordinator polls."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        self._entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+        current = self._entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES)
+        schema = vol.Schema(
+            {vol.Optional(CONF_SCAN_INTERVAL, default=current): vol.All(vol.Coerce(int), vol.Range(min=5))}
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

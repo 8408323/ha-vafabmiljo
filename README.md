@@ -29,6 +29,11 @@ for default-store listing. Add it as a HACS custom repository instead
    second entry for a different address is fine. Adding the *same* address twice is
    blocked. Moved, or picked the wrong address? Reconfigure the entry (⋮ → Reconfigure)
    instead of removing and re-adding it - your BankID login carries over.
+5. The poll interval (default 30 minutes) is configurable per entry (⋮ → Configure) if
+   you want it faster or slower - this is a waste-collection calendar, not live data, so
+   the default is usually fine.
+
+Available in English and Swedish, matching HA's own language setting.
 
 ## Known limitations
 

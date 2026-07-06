@@ -14,7 +14,12 @@ import pytest
 from homeassistant.config_entries import ConfigEntry, FlowResultType
 from homeassistant.core import HomeAssistant
 from vafabmiljo.api import VafabMiljoAuthError, VafabMiljoError
-from vafabmiljo.config_flow import VafabMiljoConfigFlow, _is_authenticated, _qr_markdown
+from vafabmiljo.config_flow import (
+    VafabMiljoConfigFlow,
+    VafabMiljoOptionsFlow,
+    _is_authenticated,
+    _qr_markdown,
+)
 
 
 def _make_flow(hass: HomeAssistant, client=None) -> VafabMiljoConfigFlow:
@@ -272,6 +277,32 @@ async def test_reconfigure_address_updates_entry_and_reloads(hass, mock_client):
     assert entry.data["address"] == "Nygatan 5"
     assert entry.data["plant_id"] == "p2"
     mock_client.set_address.assert_awaited_once_with("p2")
+
+
+def test_async_get_options_flow_returns_options_flow():
+    entry = ConfigEntry(data={})
+    options_flow = VafabMiljoConfigFlow.async_get_options_flow(entry)
+    assert isinstance(options_flow, VafabMiljoOptionsFlow)
+
+
+async def test_options_flow_shows_current_default():
+    entry = ConfigEntry(data={})
+    flow = VafabMiljoOptionsFlow(entry)
+
+    result = await flow.async_step_init()
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+
+async def test_options_flow_saves_scan_interval():
+    entry = ConfigEntry(data={})
+    flow = VafabMiljoOptionsFlow(entry)
+
+    result = await flow.async_step_init({"scan_interval": 15})
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"] == {"scan_interval": 15}
 
 
 def test_is_authenticated_handles_both_shapes():
