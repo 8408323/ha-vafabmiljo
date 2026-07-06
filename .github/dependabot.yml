@@ -1,0 +1,15 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Pinned <3.10: aioresponses 0.7.9's mocked ClientResponse isn't compatible
+      # with aiohttp's newer required stream_writer kwarg. See pyproject.toml.
+      - dependency-name: "aiohttp"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
