@@ -40,6 +40,15 @@
     "sensor": {
       "latest_invoice": {
         "name": "Latest invoice"
+      },
+      "property": {
+        "name": "Property"
+      },
+      "available_orders": {
+        "name": "Available orders"
+      },
+      "available_complaints": {
+        "name": "Available complaints"
       }
     },
     "switch": {
