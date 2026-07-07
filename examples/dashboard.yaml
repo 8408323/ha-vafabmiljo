@@ -7,28 +7,74 @@
 #
 # To use: Settings -> Dashboards -> Add dashboard -> Take control -> paste
 # this in the YAML editor (top-right menu -> Edit in YAML).
+#
+# Card titles/text here are in English - Lovelace doesn't translate
+# hand-authored card titles for you (entity names already follow your HA
+# language via the integration's own translations), so if you want this in
+# Swedish, just edit the strings below.
 
 title: VafabMiljö
 views:
   - title: Waste collection
     path: vafabmiljo
+    icon: mdi:trash-can-outline
     cards:
-      - type: entities
-        title: Next pickup
-        entities:
-          - entity: sensor.exempelgatan_1_exempelstad_matavfall
-          - entity: sensor.exempelgatan_1_exempelstad_restavfall
-          - entity: sensor.exempelgatan_1_exempelstad_plast_och_papper
+      # A one-line "do I need to do anything tonight" summary, so that's
+      # answered without reading three separate sensors.
+      - type: markdown
+        content: >-
+          {% set due_tonight = [] %}
+          {% if is_state('binary_sensor.exempelgatan_1_exempelstad_matavfall_tomorrow', 'on') %}{% set due_tonight = due_tonight + ['Matavfall'] %}{% endif %}
+          {% if is_state('binary_sensor.exempelgatan_1_exempelstad_restavfall_tomorrow', 'on') %}{% set due_tonight = due_tonight + ['Restavfall'] %}{% endif %}
+          {% if is_state('binary_sensor.exempelgatan_1_exempelstad_plast_och_papper_tomorrow', 'on') %}{% set due_tonight = due_tonight + ['Plast och papper'] %}{% endif %}
+          {% if due_tonight %}
+          ## 🗑️ Put out tonight: {{ due_tonight | join(', ') }}
+          {% else %}
+          ## ✅ Nothing to put out tonight
+          {% endif %}
 
-      - type: entities
-        title: Put the bins out tonight?
-        entities:
-          - entity: binary_sensor.exempelgatan_1_exempelstad_matavfall_tomorrow
-          - entity: binary_sensor.exempelgatan_1_exempelstad_restavfall_tomorrow
-          - entity: binary_sensor.exempelgatan_1_exempelstad_plast_och_papper_tomorrow
+      # One tile per bin type, each with its own icon so the grid reads at a
+      # glance instead of as a list of similar-looking rows.
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: tile
+            entity: sensor.exempelgatan_1_exempelstad_matavfall
+            name: Matavfall
+            icon: mdi:leaf
+          - type: tile
+            entity: sensor.exempelgatan_1_exempelstad_restavfall
+            name: Restavfall
+            icon: mdi:trash-can-outline
+          - type: tile
+            entity: sensor.exempelgatan_1_exempelstad_plast_och_papper
+            name: Plast och papper
+            icon: mdi:recycle
+
+      # Same three, but the "due tomorrow" binary sensors - tiles color
+      # themselves automatically based on on/off state, so this doubles as
+      # the at-a-glance version of the markdown summary above.
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: tile
+            entity: binary_sensor.exempelgatan_1_exempelstad_matavfall_tomorrow
+            name: Matavfall tomorrow
+            icon: mdi:leaf
+          - type: tile
+            entity: binary_sensor.exempelgatan_1_exempelstad_restavfall_tomorrow
+            name: Restavfall tomorrow
+            icon: mdi:trash-can-outline
+          - type: tile
+            entity: binary_sensor.exempelgatan_1_exempelstad_plast_och_papper_tomorrow
+            name: Plast och papper tomorrow
+            icon: mdi:recycle
 
       - type: entities
         title: Notifications
+        icon: mdi:bell-outline
         entities:
           - entity: switch.exempelgatan_1_exempelstad_waste_pickup_notifications
           - entity: switch.exempelgatan_1_exempelstad_operational_information_notifications
@@ -37,9 +83,10 @@ views:
           - entity: time.exempelgatan_1_exempelstad_notification_time
 
       # Everything below needs BankID connected (see the README) - remove
-      # this card if you skipped that during setup.
+      # these cards if you skipped that during setup.
       - type: entities
         title: Account
+        icon: mdi:account-outline
         entities:
           - entity: sensor.exempelgatan_1_exempelstad_latest_invoice
           - entity: sensor.exempelgatan_1_exempelstad_property
@@ -64,3 +111,16 @@ views:
         tap_action:
           action: perform-action
           perform_action: script.download_latest_vafab_invoice
+
+      - type: entities
+        title: Contract fees
+        icon: mdi:cash-multiple
+        entities:
+          - entity: sensor.exempelgatan_1_exempelstad_fast_grundavgift_smahus
+
+      - type: entities
+        title: Orders & complaints
+        icon: mdi:clipboard-list-outline
+        entities:
+          - entity: sensor.exempelgatan_1_exempelstad_available_orders
+          - entity: sensor.exempelgatan_1_exempelstad_available_complaints
