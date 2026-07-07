@@ -260,6 +260,27 @@ async def test_bankid_wait_error_falls_back_to_failed_step(hass, mock_client):
     assert failed_result["errors"] == {"base": "cannot_connect"}
 
 
+async def test_bankid_qr_expiry_detected_without_waiting_for_full_timeout(hass, mock_client):
+    # BankID's own terminal failure (unscanned QR expiry, ~25-30s in reality)
+    # must be caught immediately - not just eventually via BANKID_POLL_TIMEOUT.
+    mock_client.poll_bankid_status.return_value = {
+        "status": {"code": "BANKID_MSG", "message": {"status": "failed", "hintCode": "startFailed"}},
+        "qr": "",
+        "hint": "startFailed",
+    }
+    flow = _make_flow(hass, mock_client)
+
+    first = await flow.async_step_bankid_wait()
+    assert first["type"] == FlowResultType.SHOW_PROGRESS
+    await _settle(flow._bankid_task)
+
+    result = await flow.async_step_bankid_wait()
+    assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "bankid_failed"}
+
+    failed_result = await flow.async_step_bankid_failed()
+    assert failed_result["errors"] == {"base": "qr_expired"}
+
+
 async def test_bankid_wait_gives_up_after_poll_timeout(hass, mock_client, monkeypatch):
     # Never-authenticated pending status forever - the loop must eventually
     # give up rather than poll indefinitely.
@@ -301,6 +322,25 @@ async def test_reauth_bankid_wait_auth_error_reprompts(hass, mock_client):
     result = await flow.async_step_reauth_bankid_wait()
 
     assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "reauth_confirm"}
+
+
+async def test_reauth_bankid_qr_expiry_shows_error_on_reconfirm(hass, mock_client):
+    mock_client.poll_bankid_status.return_value = {
+        "status": {"code": "BANKID_MSG", "message": {"status": "failed", "hintCode": "startFailed"}},
+        "qr": "",
+        "hint": "startFailed",
+    }
+    flow = _make_flow(hass, mock_client)
+    flow._reauth_entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
+
+    first = await flow.async_step_reauth_bankid_wait()
+    assert first["type"] == FlowResultType.SHOW_PROGRESS
+    await _settle(flow._bankid_task)
+    await flow.async_step_reauth_bankid_wait()
+
+    result = await flow.async_step_reauth_confirm()
+
+    assert result["errors"] == {"base": "qr_expired"}
 
 
 async def test_reconfigure_no_matches_shows_error(hass, mock_client):

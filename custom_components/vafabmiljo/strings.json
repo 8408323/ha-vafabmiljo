@@ -41,7 +41,8 @@
     },
     "error": {
       "cannot_connect": "Failed to reach VafabMiljö. Please try again.",
-      "no_matches": "No address matched that search."
+      "no_matches": "No address matched that search.",
+      "qr_expired": "The QR code expired before it was scanned. Submit again for a new one."
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured%]",
