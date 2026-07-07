@@ -109,6 +109,32 @@ async def test_keep_alive_auth_error_triggers_reauth():
         await _make_coordinator(client)._async_update_data()
 
 
+async def test_get_customer_called_before_account_data(caplog):
+    # Confirmed live: fixes a real account whose invoices stayed 202
+    # "waiting" for hours (see api.py's VafabMiljoClient.get_customer).
+    client = _authenticated_client()
+
+    await _make_coordinator(client)._async_update_data()
+
+    client.get_customer.assert_awaited_once()
+
+
+async def test_get_customer_failure_is_tolerated(caplog):
+    client = _authenticated_client(get_customer=AsyncMock(side_effect=VafabMiljoError("boom")))
+
+    data = await _make_coordinator(client)._async_update_data()
+
+    assert data.authenticated is True
+    assert "Failed to fetch customer record: boom" in caplog.text
+
+
+async def test_get_customer_auth_error_triggers_reauth():
+    client = _authenticated_client(get_customer=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await _make_coordinator(client)._async_update_data()
+
+
 async def test_authenticated_account_fetch_failure_is_tolerated(caplog):
     # invoices/sanitation/properties/orders/complaints are independent - one
     # endpoint stuck or failing (e.g. an account whose /services/invoices

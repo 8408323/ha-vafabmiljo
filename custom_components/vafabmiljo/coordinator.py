@@ -87,6 +87,17 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         except VafabMiljoError as err:
             _LOGGER.warning("Failed to keep the BankID session alive: %s", err)
 
+        # Confirmed live: an account with invoices stuck returning 202
+        # "waiting" for hours started returning 200 immediately after one
+        # call to this endpoint. See VafabMiljoClient.get_customer for why -
+        # its own data is discarded here, only the side effect matters.
+        try:
+            await self.client.get_customer()
+        except VafabMiljoAuthError as err:
+            raise ConfigEntryAuthFailed("The VafabMiljö BankID session expired") from err
+        except VafabMiljoError as err:
+            _LOGGER.warning("Failed to fetch customer record: %s", err)
+
         invoices = await self._try_fetch("invoices", self.client.get_invoices)
         sanitation = await self._try_fetch("sanitation", self.client.get_sanitation)
         properties = await self._try_fetch("properties", self.client.get_properties)
