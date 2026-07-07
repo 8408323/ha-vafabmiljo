@@ -122,16 +122,12 @@ async def test_bankid_start_skip_creates_entry_directly(hass, mock_client):
 
 async def test_bankid_start_enabled_moves_to_wait(hass, mock_client):
     mock_client.start_bankid_auth.return_value = {"qr": "<svg>first</svg>"}
-    mock_client.poll_bankid_status.return_value = {
-        "status": {"message": {"hintCode": "outstandingTransaction"}},
-        "qr": "<svg>poll</svg>",
-        "hint": "outstandingTransaction",
-    }
+    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
     flow = _make_flow(hass, mock_client)
     flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
 
     # First entry shows the QR from start_bankid_auth() and schedules the
-    # first background poll (progress_task) - it hasn't run yet.
+    # single background poll-loop task (progress_task) - it hasn't run yet.
     result = await flow.async_step_bankid_start({"enable_bankid": True})
     assert result["type"] == FlowResultType.SHOW_PROGRESS
     assert result["step_id"] == "bankid_wait"
@@ -140,14 +136,40 @@ async def test_bankid_start_enabled_moves_to_wait(hass, mock_client):
     assert "first" in base64.b64decode(encoded).decode()
     mock_client.poll_bankid_status.assert_not_called()
 
-    # Once the scheduled poll task completes, HA re-invokes this step - the QR
-    # is now the freshly-polled one.
+    # Once the task completes (authenticated), HA re-invokes this step and the
+    # flow finishes - a single task is used throughout, not one per poll
+    # round, since HA can re-enter a progress step before a task is done and
+    # creating a fresh task each round trips core issue #95749.
     await _settle(flow._bankid_task)
     result2 = await flow.async_step_bankid_wait()
-    assert result2["type"] == FlowResultType.SHOW_PROGRESS
-    qr_markdown2 = result2["description_placeholders"]["qr_code"]
-    encoded2 = qr_markdown2.split("base64,", 1)[1].rstrip(")")
-    assert "poll" in base64.b64decode(encoded2).decode()
+    assert result2 == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "finish"}
+
+
+async def test_bankid_wait_reenters_before_task_done_shows_same_task(hass, mock_client):
+    # HA's flow manager can re-invoke a progress step before its task is done
+    # (e.g. a frontend reload) - this must keep showing progress with the
+    # *same* task, not read its (not yet available) result.
+    gate = asyncio.Event()
+
+    async def _blocked_poll():
+        await gate.wait()
+        return {"status": "authenticated successfully", "qr": "", "hint": ""}
+
+    mock_client.poll_bankid_status.side_effect = _blocked_poll
+
+    flow = _make_flow(hass, mock_client)
+    first = await flow.async_step_bankid_wait()
+    assert first["type"] == FlowResultType.SHOW_PROGRESS
+    task = flow._bankid_task
+    await asyncio.sleep(0)  # let the task start and block on gate.wait()
+
+    result = await flow.async_step_bankid_wait()
+
+    assert result["type"] == FlowResultType.SHOW_PROGRESS
+    assert flow._bankid_task is task
+
+    gate.set()
+    await _settle(task)
 
 
 async def test_bankid_wait_completes_when_authenticated(hass, mock_client):
@@ -194,18 +216,13 @@ async def test_reauth_flow_updates_session_cookie(hass, mock_client):
     entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1", "session_cookie": "old-cookie"})
     flow._reauth_entry = entry
 
-    # First entry into reauth_confirm starts BankID and schedules the first poll.
+    # First entry into reauth_confirm starts BankID and schedules the single
+    # poll-loop task, which polls twice (pending, then authenticated) inside
+    # itself before completing.
     confirm_result = await flow.async_step_reauth_confirm({})
     assert confirm_result["type"] == FlowResultType.SHOW_PROGRESS
     assert flow._client is mock_client
 
-    # First (pending) poll resolves - HA re-invokes the wait step, which sees
-    # it's not authenticated yet and schedules a second poll.
-    await _settle(flow._bankid_task)
-    pending_result = await flow.async_step_reauth_bankid_wait()
-    assert pending_result["type"] == FlowResultType.SHOW_PROGRESS
-
-    # Second poll resolves authenticated - the flow finishes.
     await _settle(flow._bankid_task)
     wait_result = await flow.async_step_reauth_bankid_wait()
     assert wait_result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "reauth_finish"}
@@ -241,6 +258,25 @@ async def test_bankid_wait_error_falls_back_to_failed_step(hass, mock_client):
     assert failed_result["type"] == FlowResultType.FORM
     assert failed_result["step_id"] == "bankid_start"
     assert failed_result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_bankid_wait_gives_up_after_poll_timeout(hass, mock_client, monkeypatch):
+    # Never-authenticated pending status forever - the loop must eventually
+    # give up rather than poll indefinitely.
+    monkeypatch.setattr(config_flow_module, "BANKID_POLL_TIMEOUT", -1)
+    mock_client.poll_bankid_status.return_value = {
+        "status": {"message": {"hintCode": "outstandingTransaction"}},
+        "qr": "<svg>pending</svg>",
+        "hint": "outstandingTransaction",
+    }
+    flow = _make_flow(hass, mock_client)
+
+    first = await flow.async_step_bankid_wait()
+    assert first["type"] == FlowResultType.SHOW_PROGRESS
+    await _settle(flow._bankid_task)
+
+    result = await flow.async_step_bankid_wait()
+    assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "bankid_failed"}
 
 
 async def test_reauth_entry_point_delegates_to_confirm(hass, mock_client):
@@ -375,6 +411,16 @@ def test_qr_markdown_adds_white_background_rect():
     # renders illegibly transparent against HA's own (often dark) theme.
     decoded = _decode_qr_markdown(_qr_markdown('<svg xmlns="http://www.w3.org/2000/svg">x</svg>'))
     assert '<rect width="100%" height="100%" fill="#ffffff"/>' in decoded
+
+
+def test_qr_markdown_rect_matches_negative_viewbox():
+    # BankID's real SVG uses a viewBox with a negative origin (e.g. "-4 -4 49
+    # 49") - a plain 0,0/100%/100% rect leaves the top-left quiet zone
+    # uncovered while overshooting the bottom-right, so the rect must match
+    # the viewBox's own x/y/width/height exactly.
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 49 49">x</svg>'
+    decoded = _decode_qr_markdown(_qr_markdown(svg))
+    assert '<rect x="-4" y="-4" width="49" height="49" fill="#ffffff"/>' in decoded
 
 
 def test_qr_markdown_does_not_double_add_rect_if_already_present():
