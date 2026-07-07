@@ -47,7 +47,6 @@ views:
 
       # Full invoice history, from the "invoices" attribute on the
       # latest-invoice sensor. Built-in markdown card, no custom card needed.
-      # See automation.yaml for a button that downloads the latest one.
       - type: markdown
         title: Invoices
         content: >-
@@ -55,13 +54,13 @@ views:
           - **{{ inv.amount }} kr** ({{ inv.invoice_date }}, due {{ inv.due_date }}) - {{ inv.payment_status }} (id: {{ inv.id }})
           {% endfor %}
 
+      # Calls the script in script.yaml, not the service directly - a tile's
+      # tap_action doesn't template its `data:` fields, so figuring out
+      # "which invoice is the latest one" has to happen in a script instead.
       - type: tile
         entity: sensor.exempelgatan_1_exempelstad_latest_invoice
         name: Download latest invoice
         icon: mdi:file-pdf-box
         tap_action:
           action: perform-action
-          perform_action: vafabmiljo.download_invoice
-          data:
-            invoice_id: >-
-              {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].id }}
+          perform_action: script.download_latest_vafab_invoice

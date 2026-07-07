@@ -1,0 +1,18 @@
+# Example script backing the "Download latest invoice" dashboard tile (see
+# dashboard.yaml). A dashboard tap_action's own `data:` fields are NOT
+# templated - a Jinja expression there is sent to the service literally, as
+# text, which fails since the service expects a real invoice ID. Scripts (and
+# automations) DO template their action data, so the templating has to live
+# here rather than in the tile itself.
+#
+# To use: Settings -> Automations & scenes -> Scripts -> top-right menu ->
+# Edit in YAML, paste this in (or merge it with what's already there).
+
+download_latest_vafab_invoice:
+  alias: "Download latest VafabMiljö invoice"
+  sequence:
+    - action: vafabmiljo.download_invoice
+      data:
+        invoice_id: >-
+          {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].id }}
+  mode: single
