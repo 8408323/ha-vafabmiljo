@@ -61,14 +61,23 @@ def _install_stub_homeassistant() -> None:
     class _ServiceRegistry:
         def __init__(self) -> None:
             self._handlers: dict[tuple[str, str], Any] = {}
+            self._schemas: dict[tuple[str, str], Any] = {}
 
         def has_service(self, domain: str, service: str) -> bool:
             return (domain, service) in self._handlers
 
         def async_register(self, domain, service, handler, schema=None, supports_response=None) -> None:
             self._handlers[(domain, service)] = handler
+            self._schemas[(domain, service)] = schema
 
         async def async_call(self, domain, service, service_data=None, blocking=True, return_response=False):
+            # Real HA validates against the registered schema before calling
+            # the handler - do the same here, rather than passing raw test
+            # input straight through, so a schema/selector mismatch (e.g. a
+            # dashboard template rendering a string where the schema wants an
+            # actual int) shows up in tests instead of only live.
+            if (schema := self._schemas.get((domain, service))) is not None:
+                service_data = schema(service_data or {})
             return await self._handlers[(domain, service)](ServiceCall(service_data))
 
     class HomeAssistant:

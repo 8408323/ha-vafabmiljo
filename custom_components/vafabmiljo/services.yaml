@@ -3,6 +3,10 @@ download_invoice:
     invoice_id:
       required: true
       example: 4287069
+      # text, not number: a dashboard tap_action commonly fills this via a
+      # Jinja template (e.g. the latest invoice's id from the sensor
+      # attribute), which always renders as a string - a number selector
+      # rejects that client-side before the call is even sent. The backend's
+      # own voluptuous schema (int) still coerces it properly either way.
       selector:
-        number:
-          mode: box
+        text:

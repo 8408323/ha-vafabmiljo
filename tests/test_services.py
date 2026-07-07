@@ -64,6 +64,26 @@ async def test_download_invoice_writes_file_and_returns_path(tmp_path):
     assert written.read_bytes() == b"%PDF-1.4 fake"
 
 
+async def test_download_invoice_accepts_string_invoice_id(tmp_path):
+    # Reproduces a real bug: a dashboard tile fills invoice_id via a Jinja
+    # template (the latest invoice's id from the sensor attribute), which
+    # always renders as a string - "4287069", not 4287069. A bare `int` in
+    # the schema rejected that outright ("expected int for dictionary value"),
+    # even though the value coerces to a valid int just fine.
+    coordinator = _coordinator(b"%PDF-1.4 fake")
+    hass = _hass_with_entries([_entry(coordinator)])
+    hass.config.path = lambda *parts: str(tmp_path.joinpath(*parts))
+    async_setup_services(hass)
+
+    result = await hass.services.async_call(
+        DOMAIN, SERVICE_DOWNLOAD_INVOICE, {"invoice_id": "123"}, return_response=True
+    )
+
+    written = _path_from_result(result, tmp_path)
+    assert written.read_bytes() == b"%PDF-1.4 fake"
+    coordinator.client.download_invoice.assert_awaited_once_with(123)
+
+
 async def test_download_invoice_filename_is_not_the_predictable_invoice_id(tmp_path):
     coordinator = _coordinator(b"%PDF-1.4 fake")
     hass = _hass_with_entries([_entry(coordinator)])

@@ -22,7 +22,16 @@ from .const import DOMAIN
 
 SERVICE_DOWNLOAD_INVOICE = "download_invoice"
 
-_DOWNLOAD_INVOICE_SCHEMA = vol.Schema({vol.Required("invoice_id"): int})
+_DOWNLOAD_INVOICE_SCHEMA = vol.Schema(
+    {
+        # Coerce, not a bare int - a dashboard tap_action fills this via a
+        # Jinja template (e.g. the latest invoice's id from the sensor
+        # attribute), which always renders as a string. voluptuous's bare
+        # `int` requires an actual int and rejects "4287069" outright;
+        # Coerce(int) calls int() on it like the rest of the stack expects.
+        vol.Required("invoice_id"): vol.Coerce(int),
+    }
+)
 
 # www/ is served over HTTP with no authentication at all - the filename itself
 # is the only thing standing between "you have an HA session" and "you have
