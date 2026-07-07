@@ -10,10 +10,13 @@ what was captured and what wasn't.
 
 ## Installation
 
-Not (yet) in the HACS default store - it has no brand icon in
-[home-assistant/brands](https://github.com/home-assistant/brands), which HACS requires
-for default-store listing. Add it as a HACS custom repository instead
+Not (yet) in the HACS default store. Add it as a HACS custom repository instead
 (HACS → ⋮ → Custom repositories → this repo URL, category "Integration").
+
+The integration ships its own brand icon (`custom_components/vafabmiljo/brand/`), so it
+shows up correctly in HA's UI (HA 2026.3+, served locally - no
+[home-assistant/brands](https://github.com/home-assistant/brands) submission needed for
+that anymore).
 
 ## Setup
 
