@@ -6,8 +6,15 @@ get invoices and contract data. BankID progress uses HA's async_show_progress
 with a real progress_task (required since HA Core 2024.8 - omitting it falls
 back to a deprecated polling workaround that, on a modern HA instance, does
 not reliably refresh the QR or ever re-enter the step once BankID confirms).
-Each poll sleeps BANKID_POLL_INTERVAL first, then the flow manager
-automatically re-invokes the *_bankid_wait step when that task completes.
+
+The poll loop is a *single* long-running task for the whole wait, not one
+task per poll round - HA can re-invoke a progress step before its task is
+done (e.g. a frontend reload), and creating a fresh task each round trips
+https://github.com/home-assistant/core/issues/95749 (the flow advances
+prematurely, before the newest task ever gets a chance to finish). The
+trade-off: the QR shown to the user is a single snapshot and won't visually
+rotate during the wait, since HA has no supported way to update
+description_placeholders mid-task without re-triggering that same bug.
 """
 
 from __future__ import annotations
@@ -15,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -23,9 +31,10 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResu
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig
 
-from .api import VafabMiljoAuthError, VafabMiljoClient, VafabMiljoError
+from .api import VafabMiljoClient, VafabMiljoError, VafabMiljoTimeoutError
 from .const import (
     BANKID_POLL_INTERVAL,
+    BANKID_POLL_TIMEOUT,
     CONF_ADDRESS,
     CONF_CITY,
     CONF_DEVICE_BEARER,
@@ -44,9 +53,18 @@ _LOGGER = logging.getLogger(__name__)
 def _qr_markdown(svg: str) -> str:
     # BankID's QR SVG draws only black modules with no background rect, which
     # renders as transparent (showing HA's own theme through it, dark or
-    # light) unless we give it one ourselves.
+    # light) unless we give it one ourselves. The SVG's viewBox has a negative
+    # origin (e.g. "-4 -4 49 49"), so the rect must match it exactly rather
+    # than a plain 0,0/100%/100% one - otherwise it leaves the top-left
+    # quiet zone uncovered while overshooting the bottom-right.
     if "<svg" in svg and "<rect" not in svg:
-        svg = svg.replace(">", '><rect width="100%" height="100%" fill="#ffffff"/>', 1)
+        match = re.search(r'viewBox="([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)"', svg)
+        if match:
+            x, y, width, height = match.groups()
+            rect = f'<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="#ffffff"/>'
+        else:
+            rect = '<rect width="100%" height="100%" fill="#ffffff"/>'
+        svg = svg.replace(">", f">{rect}", 1)
     encoded = base64.b64encode(svg.encode()).decode()
     return f"![BankID QR code](data:image/svg+xml;base64,{encoded})"
 
@@ -129,20 +147,34 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             catch=VafabMiljoError,
         )
 
-    async def _poll_bankid_after_delay(self) -> dict[str, Any]:
+    async def _poll_bankid_until_done(self) -> dict[str, Any]:
+        """Poll status on a loop, sleeping between rounds, until authenticated or an error.
+
+        This has to be a *single* long-running task rather than one task per
+        poll: HA's flow manager can re-invoke a progress step before a task
+        completes (e.g. on a frontend reload), and creating a fresh task each
+        round trips a known core bug where the flow advances prematurely
+        without ever waiting for the newest task
+        (https://github.com/home-assistant/core/issues/95749).
+        """
         assert self._client is not None
-        await asyncio.sleep(BANKID_POLL_INTERVAL)
-        return await self._client.poll_bankid_status()
+        deadline = asyncio.get_event_loop().time() + BANKID_POLL_TIMEOUT
+        while True:
+            await asyncio.sleep(BANKID_POLL_INTERVAL)
+            status = await self._client.poll_bankid_status()
+            if _is_authenticated(status):
+                return status
+            if status.get("qr"):
+                self._qr_svg = status["qr"]
+            if asyncio.get_event_loop().time() >= deadline:
+                raise VafabMiljoTimeoutError("BankID login was never confirmed")
 
     async def _async_bankid_wait(
         self, *, step_id: str, failure_step_id: str, success_step_id: str, catch: type[Exception]
     ) -> ConfigFlowResult:
-        # Modern HA re-invokes this step automatically when progress_task
-        # completes (no progress_task is deprecated since HA Core 2024.8 and,
-        # on top of no longer refreshing the QR reliably, can get stuck
-        # showing progress forever without ever calling this step again).
         if self._bankid_task is None:
-            self._bankid_task = self.hass.async_create_task(self._poll_bankid_after_delay())
+            self._bankid_task = self.hass.async_create_task(self._poll_bankid_until_done())
+        if not self._bankid_task.done():
             return self.async_show_progress(
                 step_id=step_id,
                 progress_action="waiting_for_bankid",
@@ -151,20 +183,10 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         task, self._bankid_task = self._bankid_task, None
         try:
-            status = task.result()
+            task.result()  # only raises on failure/timeout - success is implicit
         except catch:
             return self.async_show_progress_done(next_step_id=failure_step_id)
-        if _is_authenticated(status):
-            return self.async_show_progress_done(next_step_id=success_step_id)
-        if status.get("qr"):
-            self._qr_svg = status["qr"]
-        self._bankid_task = self.hass.async_create_task(self._poll_bankid_after_delay())
-        return self.async_show_progress(
-            step_id=step_id,
-            progress_action="waiting_for_bankid",
-            description_placeholders={"qr_code": _qr_markdown(self._qr_svg)},
-            progress_task=self._bankid_task,
-        )
+        return self.async_show_progress_done(next_step_id=success_step_id)
 
     async def async_step_bankid_failed(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_form(
@@ -215,7 +237,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reauth_bankid_wait",
             failure_step_id="reauth_confirm",
             success_step_id="reauth_finish",
-            catch=VafabMiljoAuthError,
+            catch=VafabMiljoError,
         )
 
     async def async_step_reauth_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
