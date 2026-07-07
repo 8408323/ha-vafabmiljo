@@ -1,27 +1,48 @@
 # ha-vafabmiljo
 
-A Home Assistant custom integration for [VafabMiljö](https://vafabmiljo.se) (Swedish
-municipal waste collection - Västerås/Köping/Arboga area): next pickup dates per bin
-type, invoices, waste-contract fees, and (read-only) available order/complaint types.
+Home Assistant custom integration for [VafabMiljö](https://vafabmiljo.se) — Swedish
+municipal waste collection covering the Västerås/Köping/Arboga area: pickup calendar,
+invoices (with PDF download), waste-contract fees, and notification preferences.
+
+> **Status**: Working — anonymous pickup calendar + BankID account data (invoices,
+> contracts, notifications) implemented and live-tested against a real account.
 
 Reverse-engineered from the official Android app (`se.vafab.app`) - none of this API is
 publicly documented. See the endpoint catalog in the codebase comments (`api.py`) for
 what was captured and what wasn't.
 
+## Support
+
+If you find this integration useful, you can buy me a coffee ☕
+
+[![Buy me a coffee](https://img.buymeacoffee.com/button-api/?text=Buy+me+a+coffee&emoji=&slug=jhara&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://www.buymeacoffee.com/jhara)
+
 ## Installation
 
-Not (yet) in the HACS default store. Add it as a HACS custom repository instead
-(HACS → ⋮ → Custom repositories → this repo URL, category "Integration").
+### HACS (recommended)
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=8408323&repository=ha-vafabmiljo&category=integration)
+
+Not (yet) in the HACS default store, so add it as a custom repository:
+
+1. In HACS, go to **Integrations → ⋮ → Custom repositories**.
+2. Add `https://github.com/8408323/ha-vafabmiljo` as an **Integration**.
+3. Search for **VafabMiljö** and click **Download**.
+4. Restart Home Assistant.
 
 The integration ships its own brand icon (`custom_components/vafabmiljo/brand/`), so it
 shows up correctly in HA's UI (HA 2026.3+, served locally - no
 [home-assistant/brands](https://github.com/home-assistant/brands) submission needed for
 that anymore).
 
-## Setup
+### Manual
 
-1. Add the integration in HA (Settings → Devices & services → Add integration →
-   VafabMiljö).
+1. Copy `custom_components/vafabmiljo/` to your HA `config/custom_components/` directory.
+2. Restart Home Assistant.
+
+## Configuration
+
+1. Go to **Settings → Devices & Services → Add Integration**, search for **VafabMiljö**.
 2. Search for and select your address. This works anonymously and immediately gives you
    next-pickup-date sensors, per-bin-type "X tomorrow" binary sensors, and a
    Notification time entity - none of this needs BankID.
@@ -39,6 +60,31 @@ that anymore).
 
 Available in English and Swedish, matching HA's own language setting.
 
+## Features
+
+- Next-pickup-date sensor per bin type (e.g. Restavfall, Matavfall, Plast och papper),
+  usable with no login at all
+- Per-bin-type "pickup tomorrow" binary sensors and a local Notification time entity, as
+  building blocks for your own HA-side reminders/automations (separate from the app's own
+  push notifications)
+- BankID login for account data: invoices (with a full history attribute and a
+  `download_invoice` service action for the PDF), waste-contract fees, property details,
+  and available order/complaint types
+- Notification-preference switches and reminder-time entity, mirroring the app's own
+  settings
+- Diagnostics download and a "BankID connected" sensor
+
+## Authentication
+
+Account data uses **Swedish BankID** (same as the app). During setup, a QR code is shown
+in the HA config flow - scan it with the BankID app on your phone. It's a live snapshot,
+not a rotating one (HA has no supported way to update it mid-task without risking [a core
+bug](https://github.com/home-assistant/core/issues/95749)), and expires in about
+25-30 seconds if unscanned - if that happens, just submit the form again for a fresh one.
+
+BankID sessions expire after a period of inactivity; when that happens the integration
+triggers HA's usual reauth flow (needs another QR scan).
+
 ## HA-side notifications, dashboard, and automations
 
 This integration doesn't send any notification or control anything itself - the
@@ -49,11 +95,13 @@ sensors directly) as the trigger for your own automations: a phone notification,
 turning a color as a visual cue, whatever you want. See [`examples/`](examples/) for a
 starter dashboard and a couple of automations, including exactly that light-cue idea.
 
-The **Latest invoice** sensor's `invoices` attribute lists every invoice (id, amount,
-dates, payment status), not just the latest one - useful for a dashboard table. To get an
-actual PDF, call the `vafabmiljo.download_invoice` service action with an `invoice_id`
-from that list; it saves the file to `/config/www/vafabmiljo/` and returns the local URL
-as the response. See `examples/dashboard.yaml` for a tile that downloads the latest one.
+## Services
+
+Call these from **Developer Tools → Actions** or in automations.
+
+| Service | What it does |
+|---------|---------------|
+| `vafabmiljo.download_invoice` | Fetches one invoice as a PDF (`invoice_id` from the **Latest invoice** sensor's `invoices` attribute) and saves it to `/config/www/vafabmiljo/`, returning the local URL |
 
 ## Known limitations
 
@@ -61,27 +109,15 @@ as the response. See `examples/dashboard.yaml` for a tile that downloads the lat
   error if that parameter is missing entirely (it tries to join against every address
   nationwide and overflows a prepared-statement placeholder limit), so a search always
   needs at least one real character typed.
-- BankID sessions expire after a period of inactivity; when that happens the integration
-  will ask you to reauthenticate via HA's usual reauth flow (needs another QR scan).
-- The BankID QR shown during setup is a single snapshot and doesn't visually rotate while
-  waiting for you to scan it - HA has no supported way to update a progress step's displayed
-  content mid-task without risking [a core bug](https://github.com/home-assistant/core/issues/95749)
-  where the flow advances before it should. Scan it before the underlying BankID session
-  itself expires (a few minutes).
-- On at least one real account, `/services/invoices` never leaves the backend's 202
-  "waiting" state for this integration's client, even though the official app works fine
-  for the same account from another device - the **Latest invoice** sensor will show
-  "Unknown" if you hit this. It's not fatal (see below) but the root cause is unconfirmed;
-  a `keep_alive()` call was tried as a candidate fix and empirically ruled out. The rest
-  of the integration is unaffected either way - every authenticated endpoint fails
-  independently, so one being stuck doesn't take down invoices, sanitation, orders, etc.,
-  let alone the pickup-schedule sensors that don't need login at all.
 - Order/complaint *submission* isn't implemented - only their read-only "available
   actions" templates were ever captured, never an actual submit call, so we won't guess
   at that wire format. The "Available orders"/"Available complaints" sensors just report
   what request types exist, not anything you can act on yet.
 - Customer/contact details (which include your personal number) are deliberately not
   exposed as entities.
+- Account data (properties, invoices, contracts, etc.) genuinely requires BankID - it's
+  not enough to just know an address. Confirmed directly against the backend: those
+  endpoints return 403 without a BankID session, even with a validly bound address.
 
 ## Development
 
@@ -99,3 +135,11 @@ uv run pytest tests/ --cov=custom_components/vafabmiljo --cov-report=term-missin
 uv run ruff check custom_components/ tests/
 uv run ruff format custom_components/ tests/
 ```
+
+## Contributing
+
+Pull requests are welcome. Please open an issue first to discuss what you'd like to change.
+
+## License
+
+MIT
