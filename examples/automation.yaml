@@ -32,9 +32,10 @@ automation:
           title: "Waste collection tomorrow"
           message: "Remember to put the bins out tonight."
 
-  # A light turning red as a visual cue - e.g. by the front door, in the
-  # kitchen, wherever's useful - when Restavfall specifically needs to go
-  # out. Swap the color/entity per bin type if you want different cues.
+  # A different light color per bin type - one automation per type, each
+  # gated on that type's own "tomorrow" binary sensor. All three can fire
+  # the same evening if more than one bin is due; order them so the one
+  # you'd rather notice last runs last, or use different lights entirely.
   - alias: "VafabMiljö - light cue for Restavfall tomorrow"
     trigger:
       - platform: time
@@ -49,3 +50,33 @@ automation:
           entity_id: light.hallway
         data:
           color_name: red
+
+  - alias: "VafabMiljö - light cue for Matavfall tomorrow"
+    trigger:
+      - platform: time
+        at: time.oster_raby_11_vasteras_notification_time
+    condition:
+      - condition: state
+        entity_id: binary_sensor.oster_raby_11_vasteras_matavfall_tomorrow
+        state: "on"
+    action:
+      - service: light.turn_on
+        target:
+          entity_id: light.hallway
+        data:
+          color_name: green
+
+  - alias: "VafabMiljö - light cue for Plast och papper tomorrow"
+    trigger:
+      - platform: time
+        at: time.oster_raby_11_vasteras_notification_time
+    condition:
+      - condition: state
+        entity_id: binary_sensor.oster_raby_11_vasteras_plast_och_papper_tomorrow
+        state: "on"
+    action:
+      - service: light.turn_on
+        target:
+          entity_id: light.hallway
+        data:
+          color_name: blue
