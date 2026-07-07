@@ -76,6 +76,17 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         if not self.client.session_cookie:
             return VafabMiljoData(pickups=pickups, authenticated=False)
 
+        # The real app calls this periodically to extend the session. It does
+        # *not* fix a stuck 202 "waiting" endpoint (tested directly against
+        # the backend: still 202 twenty seconds after a successful call) -
+        # keep it only for its own documented purpose, not as a workaround.
+        try:
+            await self.client.keep_alive()
+        except VafabMiljoAuthError as err:
+            raise ConfigEntryAuthFailed("The VafabMiljö BankID session expired") from err
+        except VafabMiljoError as err:
+            _LOGGER.warning("Failed to keep the BankID session alive: %s", err)
+
         invoices = await self._try_fetch("invoices", self.client.get_invoices)
         sanitation = await self._try_fetch("sanitation", self.client.get_sanitation)
         properties = await self._try_fetch("properties", self.client.get_properties)
