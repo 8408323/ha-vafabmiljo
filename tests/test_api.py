@@ -183,6 +183,7 @@ async def test_list_next_pickup_ignores_non_list_response(client: VafabMiljoClie
         ("get_parameters", "/services/parameters"),
         ("get_orders", "/services/orders"),
         ("get_complaints", "/services/complaints"),
+        ("get_customer", "/services/customer"),
     ],
 )
 async def test_simple_get_endpoints(client: VafabMiljoClient, method_name: str, path: str):

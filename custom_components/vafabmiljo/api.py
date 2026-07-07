@@ -185,6 +185,21 @@ class VafabMiljoClient:
     async def get_properties(self) -> dict[str, Any]:
         return await self._request("GET", "/services/properties")
 
+    async def get_customer(self) -> dict[str, Any]:
+        """Fetch the account's customer record.
+
+        Confirmed (not just theorized) to unstick a persistently-202 invoices
+        endpoint: reproduced live against a real account where invoices had
+        been stuck returning "waiting" for hours - one call to this endpoint
+        and the very next invoices call immediately returned 200. The real
+        app always calls this in parallel with properties/invoices/parameters
+        right after login. The response includes personal data (name, SSN,
+        contact info), so the coordinator calls this purely for the side
+        effect and discards the result - never store or expose it as an
+        entity.
+        """
+        return await self._request("GET", "/services/customer")
+
     async def get_invoices(self) -> dict[str, Any]:
         return await self._request("GET", "/services/invoices")
 
