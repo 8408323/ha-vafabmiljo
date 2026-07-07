@@ -1,0 +1,8 @@
+download_invoice:
+  fields:
+    invoice_id:
+      required: true
+      example: 4287069
+      selector:
+        number:
+          mode: box

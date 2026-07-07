@@ -99,5 +99,17 @@
         "name": "Aviseringstid"
       }
     }
+  },
+  "services": {
+    "download_invoice": {
+      "name": "Ladda ner faktura",
+      "description": "Hämtar en faktura som PDF och sparar den i HA:s lokala www-mapp.",
+      "fields": {
+        "invoice_id": {
+          "name": "Faktura-ID",
+          "description": "Fakturans id, från sensorn Latest invoice's attribut 'invoices'."
+        }
+      }
+    }
   }
 }

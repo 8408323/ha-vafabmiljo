@@ -53,6 +53,29 @@ async def test_401_raises_auth_error(client: VafabMiljoClient):
             await client.get_invoices()
 
 
+async def test_download_invoice_returns_pdf_bytes(client: VafabMiljoClient):
+    with aioresponses() as mocked:
+        mocked.post(f"{API_BASE}/services/invoice", body=b"%PDF-1.4 fake pdf bytes", content_type="application/pdf")
+        result = await client.download_invoice(4287069)
+        assert result == b"%PDF-1.4 fake pdf bytes"
+        request = mocked.requests[("POST", URL(f"{API_BASE}/services/invoice"))][0]
+        assert request.kwargs["json"] == {"invoiceId": 4287069}
+
+
+async def test_download_invoice_401_raises_auth_error(client: VafabMiljoClient):
+    with aioresponses() as mocked:
+        mocked.post(f"{API_BASE}/services/invoice", status=401)
+        with pytest.raises(VafabMiljoAuthError):
+            await client.download_invoice(1)
+
+
+async def test_download_invoice_error_status_raises(client: VafabMiljoClient):
+    with aioresponses() as mocked:
+        mocked.post(f"{API_BASE}/services/invoice", status=500)
+        with pytest.raises(VafabMiljoError):
+            await client.download_invoice(1)
+
+
 async def test_202_waiting_is_retried_until_200(client: VafabMiljoClient, monkeypatch):
     async def no_sleep(_seconds):
         return None

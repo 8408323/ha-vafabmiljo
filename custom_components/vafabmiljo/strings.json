@@ -99,5 +99,17 @@
         "name": "Notification time"
       }
     }
+  },
+  "services": {
+    "download_invoice": {
+      "name": "Download invoice",
+      "description": "Fetches one invoice as a PDF and saves it to HA's local www folder.",
+      "fields": {
+        "invoice_id": {
+          "name": "Invoice ID",
+          "description": "The invoice's id, from the Latest invoice sensor's 'invoices' attribute."
+        }
+      }
+    }
   }
 }

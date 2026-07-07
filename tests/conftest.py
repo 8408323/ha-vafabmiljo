@@ -47,18 +47,50 @@ def _install_stub_homeassistant() -> None:
     # -- homeassistant.core ----------------------------------------------------
     core = types.ModuleType("homeassistant.core")
 
+    class ServiceCall:
+        def __init__(self, data: dict[str, Any] | None = None) -> None:
+            self.data = data or {}
+
+    class SupportsResponse(str, enum.Enum):
+        NONE = "none"
+        ONLY = "only"
+        OPTIONAL = "optional"
+
+    ServiceResponse = dict
+
+    class _ServiceRegistry:
+        def __init__(self) -> None:
+            self._handlers: dict[tuple[str, str], Any] = {}
+
+        def has_service(self, domain: str, service: str) -> bool:
+            return (domain, service) in self._handlers
+
+        def async_register(self, domain, service, handler, schema=None, supports_response=None) -> None:
+            self._handlers[(domain, service)] = handler
+
+        async def async_call(self, domain, service, service_data=None, blocking=True, return_response=False):
+            return await self._handlers[(domain, service)](ServiceCall(service_data))
+
     class HomeAssistant:
         def __init__(self) -> None:
             self.data: dict[str, Any] = {}
+            self.services = _ServiceRegistry()
+            self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts))
 
         def async_create_task(self, coro, name=None):
             return asyncio.ensure_future(coro)
+
+        async def async_add_executor_job(self, func, *args):
+            return func(*args)
 
     def callback(func):
         return func
 
     core.HomeAssistant = HomeAssistant
     core.callback = callback
+    core.ServiceCall = ServiceCall
+    core.ServiceResponse = ServiceResponse
+    core.SupportsResponse = SupportsResponse
     sys.modules["homeassistant.core"] = core
 
     # -- homeassistant.exceptions ------------------------------------------------

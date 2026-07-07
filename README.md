@@ -49,6 +49,12 @@ sensors directly) as the trigger for your own automations: a phone notification,
 turning a color as a visual cue, whatever you want. See [`examples/`](examples/) for a
 starter dashboard and a couple of automations, including exactly that light-cue idea.
 
+The **Latest invoice** sensor's `invoices` attribute lists every invoice (id, amount,
+dates, payment status), not just the latest one - useful for a dashboard table. To get an
+actual PDF, call the `vafabmiljo.download_invoice` service action with an `invoice_id`
+from that list; it saves the file to `/config/www/vafabmiljo/` and returns the local URL
+as the response. See `examples/dashboard.yaml` for a tile that downloads the latest one.
+
 ## Known limitations
 
 - Address search is server-side (`?address=<query>`) - the backend currently throws a SQL

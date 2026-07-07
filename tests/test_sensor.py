@@ -49,7 +49,7 @@ async def test_setup_adds_invoice_and_contract_sensors_when_authenticated():
         VafabMiljoData(
             pickups=[{"bins": [{"type": "Restavfall", "pickup_date": "2026-07-13"}]}],
             authenticated=True,
-            invoices={"data": [{"item": {"amount": 817}}]},
+            invoices={"data": [{"item": {"amount": 500}}]},
             sanitation={
                 "contracts": [{"id": 1, "description": "Fast avgift", "fee": {"price": 1234.56, "unit": "kr/år"}}]
             },
@@ -153,22 +153,33 @@ def test_invoice_sensor_reports_latest_invoice():
                 "data": [
                     {
                         "item": {
-                            "amount": 817,
-                            "invoiceDate": "2026-05-01",
-                            "invoiceExpirationDate": "2026-05-31",
+                            "amount": 500,
+                            "invoiceDate": "2026-01-01",
+                            "invoiceExpirationDate": "2026-01-31",
                             "paymentStatus": "Helt betald",
                             "ocrNumber": "111111111",
                         }
                     },
-                    {"item": {"amount": 808}},
+                    {"item": {"amount": 450}},
                 ]
             },
         )
     )
     sensor = VafabMiljoInvoiceSensor(coordinator, _entry())
-    assert sensor.native_value == 817
+    assert sensor.native_value == 500
     assert sensor.extra_state_attributes["invoice_count"] == 2
     assert sensor.extra_state_attributes["payment_status"] == "Helt betald"
+    invoices = sensor.extra_state_attributes["invoices"]
+    assert len(invoices) == 2
+    assert invoices[0] == {
+        "id": None,
+        "amount": 500,
+        "invoice_date": "2026-01-01",
+        "due_date": "2026-01-31",
+        "payment_status": "Helt betald",
+        "ocr_number": "111111111",
+    }
+    assert invoices[1]["amount"] == 450
 
 
 def test_invoice_sensor_handles_no_invoices():
