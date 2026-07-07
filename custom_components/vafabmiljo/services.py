@@ -51,7 +51,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_DOWNLOAD_INVOICE,
         _async_download_invoice,
         schema=_DOWNLOAD_INVOICE_SCHEMA,
-        supports_response=SupportsResponse.ONLY,
+        # OPTIONAL, not ONLY - a plain dashboard tap_action calls this without
+        # requesting a response, which HA rejects outright for ONLY. The PDF
+        # landing in www/ is the real result either way; the returned path is
+        # just a bonus for scripting/automations that do ask for it.
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
 
