@@ -110,6 +110,12 @@ automatically after 10 minutes, rather than kept around indefinitely at a
 predictable path. Download it promptly; a second call to the service just
 generates a fresh copy.
 
+Wiring this to a dashboard button takes a script, not just a tap_action - a
+Lovelace tile's `tap_action.data` isn't templated, so `invoice_id` has to be
+resolved (e.g. "whichever invoice is latest") in a script instead, which the
+tile then calls with no arguments. See [`examples/script.yaml`](examples/script.yaml)
+and the tile in [`examples/dashboard.yaml`](examples/dashboard.yaml).
+
 ## Known limitations
 
 - Address search is server-side (`?address=<query>`) - the backend currently throws a SQL
