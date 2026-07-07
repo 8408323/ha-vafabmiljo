@@ -73,6 +73,20 @@ def _is_authenticated(status: dict[str, Any]) -> bool:
     return status.get("status") == "authenticated successfully"
 
 
+def _bankid_failure_hint(status: dict[str, Any]) -> str | None:
+    """BankID's own terminal-failure signal (QR expired unscanned, cancelled, etc.).
+
+    Distinct from our own outer poll timeout - this lets a dead QR get reported
+    back (and the "Connect with BankID" form re-shown to fetch a fresh one) in
+    the ~25-30s BankID itself takes, rather than waiting out the full
+    BANKID_POLL_TIMEOUT with no chance of succeeding.
+    """
+    status_obj = status.get("status", {})
+    if isinstance(status_obj, dict) and status_obj.get("message", {}).get("status") == "failed":
+        return status_obj["message"].get("hintCode", "failed")
+    return None
+
+
 class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for VafabMiljö."""
 
@@ -90,6 +104,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         self._selected: dict[str, Any] = {}
         self._qr_svg: str = ""
         self._bankid_task: asyncio.Task[dict[str, Any]] | None = None
+        self._bankid_qr_expired: bool = False
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -164,6 +179,9 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             status = await self._client.poll_bankid_status()
             if _is_authenticated(status):
                 return status
+            if hint := _bankid_failure_hint(status):
+                self._bankid_qr_expired = True
+                raise VafabMiljoTimeoutError(f"BankID reported: {hint}")
             if status.get("qr"):
                 self._qr_svg = status["qr"]
             if asyncio.get_event_loop().time() >= deadline:
@@ -189,10 +207,12 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_progress_done(next_step_id=success_step_id)
 
     async def async_step_bankid_failed(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        error = "qr_expired" if self._bankid_qr_expired else "cannot_connect"
+        self._bankid_qr_expired = False
         return self.async_show_form(
             step_id="bankid_start",
             data_schema=vol.Schema({vol.Optional("enable_bankid", default=True): bool}),
-            errors={"base": "cannot_connect"},
+            errors={"base": error},
         )
 
     async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -230,7 +250,11 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             auth = await self._client.start_bankid_auth()
             self._qr_svg = auth.get("qr", "")
             return await self.async_step_reauth_bankid_wait()
-        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({}))
+        errors = {}
+        if self._bankid_qr_expired:
+            errors["base"] = "qr_expired"
+            self._bankid_qr_expired = False
+        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({}), errors=errors)
 
     async def async_step_reauth_bankid_wait(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self._async_bankid_wait(

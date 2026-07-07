@@ -41,7 +41,8 @@
     },
     "error": {
       "cannot_connect": "Det gick inte att nå VafabMiljö. Försök igen.",
-      "no_matches": "Ingen adress matchade sökningen."
+      "no_matches": "Ingen adress matchade sökningen.",
+      "qr_expired": "QR-koden hann gå ut innan den skannades. Skicka igen för en ny."
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured%]",
