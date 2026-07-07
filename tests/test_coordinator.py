@@ -83,14 +83,33 @@ async def test_expired_session_triggers_reauth():
         await _make_coordinator(client)._async_update_data()
 
 
-async def test_authenticated_account_fetch_failure_raises_update_failed():
-    client = AsyncMock()
-    client.session_cookie = "abc123"
-    client.list_next_pickup.return_value = []
+async def test_authenticated_account_fetch_failure_is_tolerated(caplog):
+    # invoices/sanitation/properties/orders/complaints are independent - one
+    # endpoint stuck or failing (e.g. an account whose /services/invoices
+    # never leaves the backend's 202 "waiting" state) shouldn't take down the
+    # pickup-schedule sensors, which don't need any of this account data.
+    client = _authenticated_client()
     client.get_invoices.side_effect = VafabMiljoError("boom")
 
-    with pytest.raises(UpdateFailed):
-        await _make_coordinator(client)._async_update_data()
+    data = await _make_coordinator(client)._async_update_data()
+
+    assert data.authenticated is True
+    assert data.invoices is None
+    assert data.sanitation == {"contracts": []}
+    assert "Failed to fetch invoices: boom" in caplog.text
+
+
+async def test_orders_fetch_failure_is_tolerated(caplog):
+    client = _authenticated_client(
+        get_parameters=AsyncMock(return_value={"ordersAvailable": True, "complaintsAvailable": False}),
+        get_orders=AsyncMock(side_effect=VafabMiljoError("boom")),
+    )
+
+    data = await _make_coordinator(client)._async_update_data()
+
+    assert data.authenticated is True
+    assert data.orders is None
+    assert "Failed to fetch orders: boom" in caplog.text
 
 
 async def test_pickup_fetch_failure_raises_update_failed():
