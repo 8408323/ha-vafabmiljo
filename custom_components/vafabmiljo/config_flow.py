@@ -2,14 +2,17 @@
 
 Setup has two parts: pick your address (works anonymously, no login), then
 optionally connect your account via BankID (QR shown in the HA UI) to also
-get invoices and contract data. BankID uses HA's async_show_progress /
-async_show_progress_done pairing - each time the frontend re-enters the
-"bankid_wait" step we do one status poll and either keep waiting (with a
-refreshed QR) or finish.
+get invoices and contract data. BankID progress uses HA's async_show_progress
+with a real progress_task (required since HA Core 2024.8 - omitting it falls
+back to a deprecated polling workaround that, on a modern HA instance, does
+not reliably refresh the QR or ever re-enter the step once BankID confirms).
+Each poll sleeps BANKID_POLL_INTERVAL first, then the flow manager
+automatically re-invokes the *_bankid_wait step when that task completes.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import uuid
@@ -22,6 +25,7 @@ from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig
 
 from .api import VafabMiljoAuthError, VafabMiljoClient, VafabMiljoError
 from .const import (
+    BANKID_POLL_INTERVAL,
     CONF_ADDRESS,
     CONF_CITY,
     CONF_DEVICE_BEARER,
@@ -38,6 +42,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _qr_markdown(svg: str) -> str:
+    # BankID's QR SVG draws only black modules with no background rect, which
+    # renders as transparent (showing HA's own theme through it, dark or
+    # light) unless we give it one ourselves.
+    if "<svg" in svg and "<rect" not in svg:
+        svg = svg.replace(">", '><rect width="100%" height="100%" fill="#ffffff"/>', 1)
     encoded = base64.b64encode(svg.encode()).decode()
     return f"![BankID QR code](data:image/svg+xml;base64,{encoded})"
 
@@ -62,6 +71,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         self._matches: list[dict[str, Any]] = []
         self._selected: dict[str, Any] = {}
         self._qr_svg: str = ""
+        self._bankid_task: asyncio.Task[dict[str, Any]] | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -112,19 +122,48 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="bankid_start", data_schema=schema)
 
     async def async_step_bankid_wait(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_bankid_wait(
+            step_id="bankid_wait",
+            failure_step_id="bankid_failed",
+            success_step_id="finish",
+            catch=VafabMiljoError,
+        )
+
+    async def _poll_bankid_after_delay(self) -> dict[str, Any]:
         assert self._client is not None
+        await asyncio.sleep(BANKID_POLL_INTERVAL)
+        return await self._client.poll_bankid_status()
+
+    async def _async_bankid_wait(
+        self, *, step_id: str, failure_step_id: str, success_step_id: str, catch: type[Exception]
+    ) -> ConfigFlowResult:
+        # Modern HA re-invokes this step automatically when progress_task
+        # completes (no progress_task is deprecated since HA Core 2024.8 and,
+        # on top of no longer refreshing the QR reliably, can get stuck
+        # showing progress forever without ever calling this step again).
+        if self._bankid_task is None:
+            self._bankid_task = self.hass.async_create_task(self._poll_bankid_after_delay())
+            return self.async_show_progress(
+                step_id=step_id,
+                progress_action="waiting_for_bankid",
+                description_placeholders={"qr_code": _qr_markdown(self._qr_svg)},
+                progress_task=self._bankid_task,
+            )
+        task, self._bankid_task = self._bankid_task, None
         try:
-            status = await self._client.poll_bankid_status()
-        except VafabMiljoError:
-            return self.async_show_progress_done(next_step_id="bankid_failed")
+            status = task.result()
+        except catch:
+            return self.async_show_progress_done(next_step_id=failure_step_id)
         if _is_authenticated(status):
-            return self.async_show_progress_done(next_step_id="finish")
+            return self.async_show_progress_done(next_step_id=success_step_id)
         if status.get("qr"):
             self._qr_svg = status["qr"]
+        self._bankid_task = self.hass.async_create_task(self._poll_bankid_after_delay())
         return self.async_show_progress(
-            step_id="bankid_wait",
+            step_id=step_id,
             progress_action="waiting_for_bankid",
             description_placeholders={"qr_code": _qr_markdown(self._qr_svg)},
+            progress_task=self._bankid_task,
         )
 
     async def async_step_bankid_failed(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -172,19 +211,11 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({}))
 
     async def async_step_reauth_bankid_wait(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        assert self._client is not None
-        try:
-            status = await self._client.poll_bankid_status()
-        except VafabMiljoAuthError:
-            return self.async_show_progress_done(next_step_id="reauth_confirm")
-        if _is_authenticated(status):
-            return self.async_show_progress_done(next_step_id="reauth_finish")
-        if status.get("qr"):
-            self._qr_svg = status["qr"]
-        return self.async_show_progress(
+        return await self._async_bankid_wait(
             step_id="reauth_bankid_wait",
-            progress_action="waiting_for_bankid",
-            description_placeholders={"qr_code": _qr_markdown(self._qr_svg)},
+            failure_step_id="reauth_confirm",
+            success_step_id="reauth_finish",
+            catch=VafabMiljoAuthError,
         )
 
     async def async_step_reauth_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
