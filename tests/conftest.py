@@ -9,6 +9,7 @@ integration imports, mirroring the approach used in ha-plejd's conftest.py.
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import os
 import re
@@ -49,6 +50,9 @@ def _install_stub_homeassistant() -> None:
     class HomeAssistant:
         def __init__(self) -> None:
             self.data: dict[str, Any] = {}
+
+        def async_create_task(self, coro, name=None):
+            return asyncio.ensure_future(coro)
 
     def callback(func):
         return func
