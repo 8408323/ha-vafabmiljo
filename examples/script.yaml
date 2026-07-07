@@ -15,4 +15,23 @@ download_latest_vafab_invoice:
       data:
         invoice_id: >-
           {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].id }}
+      response_variable: result
+    # The service call above succeeds silently - fine on a desktop browser
+    # where you can watch the tile, but from the phone app tapping the tile
+    # looks like nothing happened at all. A notification with a direct link
+    # gives it something to tap. Replace notify.your_phone with your own
+    # notify.mobile_app_<device> service (Settings -> People -> your user ->
+    # find the exact name, or check Developer Tools -> Actions).
+    #
+    # `result.path` is relative (e.g. /local/vafabmiljo/<name>.pdf) - the
+    # companion app resolves that against whatever server it's connected to,
+    # which is normally what you want. If tapping the notification doesn't
+    # open it, use the full external URL instead, e.g.
+    # "https://your-ha-domain{{ result.path }}".
+    - action: notify.your_phone
+      data:
+        title: "Invoice ready"
+        message: "Tap to open the PDF (deleted in 10 minutes)"
+        data:
+          url: "{{ result.path }}"
   mode: single

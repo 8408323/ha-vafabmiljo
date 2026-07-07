@@ -93,12 +93,22 @@ views:
           - entity: binary_sensor.exempelgatan_1_exempelstad_bankid_connected
 
       # Full invoice history, from the "invoices" attribute on the
-      # latest-invoice sensor. Built-in markdown card, no custom card needed.
+      # latest-invoice sensor. Built-in markdown card, no custom card needed -
+      # a table reads far better here than a flat bullet list, and .split
+      # trims the invoice_date/due_date attributes' T00:00:00 time portion,
+      # which is always midnight and just clutters a date-only column.
+      #
+      # `|-` (literal), not `>-` (folded) - folding collapses every line
+      # (including the header/separator/each row) into one space-joined
+      # paragraph, which is exactly what made this render as unformatted
+      # text instead of an actual table/list in the first place.
       - type: markdown
         title: Invoices
-        content: >-
+        content: |-
+          | Amount | Invoiced | Due | Status |
+          | --- | --- | --- | --- |
           {% for inv in state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices') or [] %}
-          - **{{ inv.amount }} kr** ({{ inv.invoice_date }}, due {{ inv.due_date }}) - {{ inv.payment_status }} (id: {{ inv.id }})
+          | {{ inv.amount }} kr | {{ inv.invoice_date.split('T')[0] }} | {{ inv.due_date.split('T')[0] }} | {{ inv.payment_status }} |
           {% endfor %}
 
       # Calls the script in script.yaml, not the service directly - a tile's
