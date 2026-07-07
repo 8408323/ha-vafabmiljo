@@ -1,0 +1,46 @@
+# Example Lovelace dashboard for the VafabMiljö integration.
+#
+# Home Assistant derives entity IDs from your address, so the ones below
+# (based on "Öster Råby 11, Västerås") won't match yours as-is. Find your
+# real ones under Settings -> Devices & services -> VafabMiljö -> your
+# address -> Entities, then replace the `oster_raby_11_vasteras` part.
+#
+# To use: Settings -> Dashboards -> Add dashboard -> Take control -> paste
+# this in the YAML editor (top-right menu -> Edit in YAML).
+
+title: VafabMiljö
+views:
+  - title: Waste collection
+    path: vafabmiljo
+    cards:
+      - type: entities
+        title: Next pickup
+        entities:
+          - entity: sensor.oster_raby_11_vasteras_matavfall
+          - entity: sensor.oster_raby_11_vasteras_restavfall
+          - entity: sensor.oster_raby_11_vasteras_plast_och_papper
+
+      - type: entities
+        title: Put the bins out tonight?
+        entities:
+          - entity: binary_sensor.oster_raby_11_vasteras_matavfall_tomorrow
+          - entity: binary_sensor.oster_raby_11_vasteras_restavfall_tomorrow
+          - entity: binary_sensor.oster_raby_11_vasteras_plast_och_papper_tomorrow
+
+      - type: entities
+        title: Notifications
+        entities:
+          - entity: switch.oster_raby_11_vasteras_waste_pickup_notifications
+          - entity: switch.oster_raby_11_vasteras_operational_information_notifications
+          - entity: switch.oster_raby_11_vasteras_news_notifications
+          - entity: time.oster_raby_11_vasteras_reminder_time
+          - entity: time.oster_raby_11_vasteras_notification_time
+
+      # Everything below needs BankID connected (see the README) - remove
+      # this card if you skipped that during setup.
+      - type: entities
+        title: Account
+        entities:
+          - entity: sensor.oster_raby_11_vasteras_latest_invoice
+          - entity: sensor.oster_raby_11_vasteras_property
+          - entity: binary_sensor.oster_raby_11_vasteras_bankid_connected
