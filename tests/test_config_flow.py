@@ -7,12 +7,14 @@ API client constructor.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.config_entries import ConfigEntry, FlowResultType
 from homeassistant.core import HomeAssistant
+from vafabmiljo import config_flow as config_flow_module
 from vafabmiljo.api import VafabMiljoAuthError, VafabMiljoError
 from vafabmiljo.config_flow import (
     VafabMiljoConfigFlow,
@@ -32,6 +34,12 @@ def _make_flow(hass: HomeAssistant, client=None) -> VafabMiljoConfigFlow:
     return flow
 
 
+async def _settle(task: asyncio.Task) -> None:
+    # Waits for the background poll task without re-raising its exception
+    # here - the flow itself is what's supposed to catch it via task.result().
+    await asyncio.wait([task])
+
+
 @pytest.fixture
 def hass():
     h = HomeAssistant()
@@ -45,6 +53,16 @@ def mock_client(monkeypatch):
     client.session_cookie = None
     monkeypatch.setattr("vafabmiljo.config_flow.VafabMiljoClient", lambda *a, **k: client)
     return client
+
+
+@pytest.fixture(autouse=True)
+def _no_real_bankid_poll_delay(monkeypatch):
+    # _poll_bankid_after_delay() sleeps BANKID_POLL_INTERVAL (2s) before every
+    # poll in production; tests just need the background task to resolve fast.
+    async def _instant_sleep(seconds):
+        return None
+
+    monkeypatch.setattr(config_flow_module.asyncio, "sleep", _instant_sleep)
 
 
 async def test_user_step_no_matches_shows_error(hass, mock_client):
@@ -112,18 +130,33 @@ async def test_bankid_start_enabled_moves_to_wait(hass, mock_client):
     flow = _make_flow(hass, mock_client)
     flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
 
+    # First entry shows the QR from start_bankid_auth() and schedules the
+    # first background poll (progress_task) - it hasn't run yet.
     result = await flow.async_step_bankid_start({"enable_bankid": True})
-
     assert result["type"] == FlowResultType.SHOW_PROGRESS
     assert result["step_id"] == "bankid_wait"
     qr_markdown = result["description_placeholders"]["qr_code"]
     encoded = qr_markdown.split("base64,", 1)[1].rstrip(")")
-    assert "poll" in base64.b64decode(encoded).decode()
+    assert "first" in base64.b64decode(encoded).decode()
+    mock_client.poll_bankid_status.assert_not_called()
+
+    # Once the scheduled poll task completes, HA re-invokes this step - the QR
+    # is now the freshly-polled one.
+    await _settle(flow._bankid_task)
+    result2 = await flow.async_step_bankid_wait()
+    assert result2["type"] == FlowResultType.SHOW_PROGRESS
+    qr_markdown2 = result2["description_placeholders"]["qr_code"]
+    encoded2 = qr_markdown2.split("base64,", 1)[1].rstrip(")")
+    assert "poll" in base64.b64decode(encoded2).decode()
 
 
 async def test_bankid_wait_completes_when_authenticated(hass, mock_client):
     mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
     flow = _make_flow(hass, mock_client)
+
+    first = await flow.async_step_bankid_wait()
+    assert first["type"] == FlowResultType.SHOW_PROGRESS
+    await _settle(flow._bankid_task)
 
     result = await flow.async_step_bankid_wait()
 
@@ -161,12 +194,19 @@ async def test_reauth_flow_updates_session_cookie(hass, mock_client):
     entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1", "session_cookie": "old-cookie"})
     flow._reauth_entry = entry
 
-    # First entry into reauth_confirm starts BankID and does the first (pending) poll.
+    # First entry into reauth_confirm starts BankID and schedules the first poll.
     confirm_result = await flow.async_step_reauth_confirm({})
     assert confirm_result["type"] == FlowResultType.SHOW_PROGRESS
     assert flow._client is mock_client
 
-    # Frontend re-enters the wait step; second poll comes back authenticated.
+    # First (pending) poll resolves - HA re-invokes the wait step, which sees
+    # it's not authenticated yet and schedules a second poll.
+    await _settle(flow._bankid_task)
+    pending_result = await flow.async_step_reauth_bankid_wait()
+    assert pending_result["type"] == FlowResultType.SHOW_PROGRESS
+
+    # Second poll resolves authenticated - the flow finishes.
+    await _settle(flow._bankid_task)
     wait_result = await flow.async_step_reauth_bankid_wait()
     assert wait_result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "reauth_finish"}
 
@@ -189,6 +229,10 @@ async def test_user_step_register_failure_shows_cannot_connect(hass, mock_client
 async def test_bankid_wait_error_falls_back_to_failed_step(hass, mock_client):
     mock_client.poll_bankid_status.side_effect = VafabMiljoError("boom")
     flow = _make_flow(hass, mock_client)
+
+    first = await flow.async_step_bankid_wait()
+    assert first["type"] == FlowResultType.SHOW_PROGRESS
+    await _settle(flow._bankid_task)
 
     result = await flow.async_step_bankid_wait()
     assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "bankid_failed"}
@@ -213,6 +257,10 @@ async def test_reauth_entry_point_delegates_to_confirm(hass, mock_client):
 async def test_reauth_bankid_wait_auth_error_reprompts(hass, mock_client):
     mock_client.poll_bankid_status.side_effect = VafabMiljoAuthError("still rejected")
     flow = _make_flow(hass, mock_client)
+
+    first = await flow.async_step_reauth_bankid_wait()
+    assert first["type"] == FlowResultType.SHOW_PROGRESS
+    await _settle(flow._bankid_task)
 
     result = await flow.async_step_reauth_bankid_wait()
 
@@ -315,3 +363,21 @@ def test_is_authenticated_handles_both_shapes():
 def test_qr_markdown_produces_data_uri():
     markdown = _qr_markdown("<svg>x</svg>")
     assert markdown.startswith("![BankID QR code](data:image/svg+xml;base64,")
+
+
+def _decode_qr_markdown(markdown: str) -> str:
+    encoded = markdown.split("base64,", 1)[1].rstrip(")")
+    return base64.b64decode(encoded).decode()
+
+
+def test_qr_markdown_adds_white_background_rect():
+    # BankID's real SVG draws only black modules with no background, which
+    # renders illegibly transparent against HA's own (often dark) theme.
+    decoded = _decode_qr_markdown(_qr_markdown('<svg xmlns="http://www.w3.org/2000/svg">x</svg>'))
+    assert '<rect width="100%" height="100%" fill="#ffffff"/>' in decoded
+
+
+def test_qr_markdown_does_not_double_add_rect_if_already_present():
+    svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="white"/>x</svg>'
+    decoded = _decode_qr_markdown(_qr_markdown(svg))
+    assert decoded == svg
