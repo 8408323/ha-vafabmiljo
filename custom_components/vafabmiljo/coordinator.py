@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -75,19 +76,17 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         if not self.client.session_cookie:
             return VafabMiljoData(pickups=pickups, authenticated=False)
 
-        try:
-            invoices = await self.client.get_invoices()
-            sanitation = await self.client.get_sanitation()
-            properties = await self.client.get_properties()
-            parameters = await self.client.get_parameters()
-            orders = await self.client.get_orders() if parameters.get("ordersAvailable") else None
-            complaints = await self.client.get_complaints() if parameters.get("complaintsAvailable") else None
-        except VafabMiljoAuthError as err:
-            # The BankID session expired - only the account-linked entities are
-            # affected, the pickup schedule above still works without login.
-            raise ConfigEntryAuthFailed("The VafabMiljö BankID session expired") from err
-        except VafabMiljoError as err:
-            raise UpdateFailed(f"Failed to fetch account data: {err}") from err
+        invoices = await self._try_fetch("invoices", self.client.get_invoices)
+        sanitation = await self._try_fetch("sanitation", self.client.get_sanitation)
+        properties = await self._try_fetch("properties", self.client.get_properties)
+        parameters = await self._try_fetch("parameters", self.client.get_parameters)
+        orders = None
+        complaints = None
+        if parameters:
+            if parameters.get("ordersAvailable"):
+                orders = await self._try_fetch("orders", self.client.get_orders)
+            if parameters.get("complaintsAvailable"):
+                complaints = await self._try_fetch("complaints", self.client.get_complaints)
 
         return VafabMiljoData(
             pickups=pickups,
@@ -99,3 +98,22 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
             orders=orders,
             complaints=complaints,
         )
+
+    async def _try_fetch(self, name: str, fetch: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any] | None:
+        """Fetch one piece of account data, tolerating a stuck/failing endpoint.
+
+        Each of these is independent account data, not required for the
+        pickup-schedule sensors that work without login at all - one endpoint
+        being persistently broken (e.g. an account whose /services/invoices
+        never leaves the backend's 202 "waiting" state) shouldn't take down
+        the whole integration.
+        """
+        try:
+            return await fetch()
+        except VafabMiljoAuthError as err:
+            # The BankID session expired - this affects every authenticated
+            # endpoint equally, so it's worth surfacing as a real reauth.
+            raise ConfigEntryAuthFailed("The VafabMiljö BankID session expired") from err
+        except VafabMiljoError as err:
+            _LOGGER.warning("Failed to fetch %s: %s", name, err)
+            return None
