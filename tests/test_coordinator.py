@@ -47,13 +47,13 @@ async def test_unauthenticated_skips_account_endpoints():
 
 async def test_authenticated_fetches_account_data():
     client = _authenticated_client(
-        get_invoices=AsyncMock(return_value={"data": [{"item": {"amount": 817}}]}),
+        get_invoices=AsyncMock(return_value={"data": [{"item": {"amount": 500}}]}),
     )
 
     data = await _make_coordinator(client)._async_update_data()
 
     assert data.authenticated is True
-    assert data.invoices == {"data": [{"item": {"amount": 817}}]}
+    assert data.invoices == {"data": [{"item": {"amount": 500}}]}
     assert data.sanitation == {"contracts": []}
     assert data.properties == {"current": {"id": 1}}
     client.get_orders.assert_not_called()

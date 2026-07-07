@@ -118,6 +118,19 @@ class VafabMiljoInvoiceSensor(CoordinatorEntity[VafabMiljoCoordinator], SensorEn
             "payment_status": latest.get("paymentStatus"),
             "ocr_number": latest.get("ocrNumber"),
             "invoice_count": len(invoices),
+            # Full history, e.g. for a dashboard table or as the source of
+            # invoice_id for the download_invoice service action.
+            "invoices": [
+                {
+                    "id": inv["item"].get("id"),
+                    "amount": inv["item"].get("amount"),
+                    "invoice_date": inv["item"].get("invoiceDate"),
+                    "due_date": inv["item"].get("invoiceExpirationDate"),
+                    "payment_status": inv["item"].get("paymentStatus"),
+                    "ocr_number": inv["item"].get("ocrNumber"),
+                }
+                for inv in invoices
+            ],
         }
 
 

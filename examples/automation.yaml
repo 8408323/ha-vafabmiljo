@@ -13,18 +13,18 @@ automation:
   - alias: "VafabMiljö - notify about tomorrow's pickup"
     trigger:
       - platform: time
-        at: time.oster_raby_11_vasteras_notification_time
+        at: time.exempelgatan_1_exempelstad_notification_time
     condition:
       - condition: or
         conditions:
           - condition: state
-            entity_id: binary_sensor.oster_raby_11_vasteras_matavfall_tomorrow
+            entity_id: binary_sensor.exempelgatan_1_exempelstad_matavfall_tomorrow
             state: "on"
           - condition: state
-            entity_id: binary_sensor.oster_raby_11_vasteras_restavfall_tomorrow
+            entity_id: binary_sensor.exempelgatan_1_exempelstad_restavfall_tomorrow
             state: "on"
           - condition: state
-            entity_id: binary_sensor.oster_raby_11_vasteras_plast_och_papper_tomorrow
+            entity_id: binary_sensor.exempelgatan_1_exempelstad_plast_och_papper_tomorrow
             state: "on"
     action:
       - service: notify.mobile_app_your_phone
@@ -39,10 +39,10 @@ automation:
   - alias: "VafabMiljö - light cue for Restavfall tomorrow"
     trigger:
       - platform: time
-        at: time.oster_raby_11_vasteras_notification_time
+        at: time.exempelgatan_1_exempelstad_notification_time
     condition:
       - condition: state
-        entity_id: binary_sensor.oster_raby_11_vasteras_restavfall_tomorrow
+        entity_id: binary_sensor.exempelgatan_1_exempelstad_restavfall_tomorrow
         state: "on"
     action:
       - service: light.turn_on
@@ -54,10 +54,10 @@ automation:
   - alias: "VafabMiljö - light cue for Matavfall tomorrow"
     trigger:
       - platform: time
-        at: time.oster_raby_11_vasteras_notification_time
+        at: time.exempelgatan_1_exempelstad_notification_time
     condition:
       - condition: state
-        entity_id: binary_sensor.oster_raby_11_vasteras_matavfall_tomorrow
+        entity_id: binary_sensor.exempelgatan_1_exempelstad_matavfall_tomorrow
         state: "on"
     action:
       - service: light.turn_on
@@ -69,10 +69,10 @@ automation:
   - alias: "VafabMiljö - light cue for Plast och papper tomorrow"
     trigger:
       - platform: time
-        at: time.oster_raby_11_vasteras_notification_time
+        at: time.exempelgatan_1_exempelstad_notification_time
     condition:
       - condition: state
-        entity_id: binary_sensor.oster_raby_11_vasteras_plast_och_papper_tomorrow
+        entity_id: binary_sensor.exempelgatan_1_exempelstad_plast_och_papper_tomorrow
         state: "on"
     action:
       - service: light.turn_on

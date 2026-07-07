@@ -203,6 +203,22 @@ class VafabMiljoClient:
     async def get_invoices(self) -> dict[str, Any]:
         return await self._request("GET", "/services/invoices")
 
+    async def download_invoice(self, invoice_id: int) -> bytes:
+        """Fetch one invoice as a PDF.
+
+        Note the *singular* `/services/invoice` - a different, undocumented
+        endpoint from the invoices list, found via static analysis of the
+        app's own JS bundle (it returns `application/pdf`, not JSON, so this
+        can't reuse `_request`). Confirmed live against the real backend.
+        """
+        url = f"{API_BASE}/services/invoice"
+        async with self._session.post(url, headers=self._headers(), json={"invoiceId": invoice_id}) as resp:
+            if resp.status == 401:
+                raise VafabMiljoAuthError("invoice download rejected the current credentials")
+            if resp.status != 200:
+                raise VafabMiljoError(f"invoice download returned HTTP {resp.status}")
+            return await resp.read()
+
     async def get_parameters(self) -> dict[str, Any]:
         return await self._request("GET", "/services/parameters")
 

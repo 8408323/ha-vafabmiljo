@@ -1,9 +1,9 @@
 # Example Lovelace dashboard for the VafabMiljö integration.
 #
 # Home Assistant derives entity IDs from your address, so the ones below
-# (based on "Öster Råby 11, Västerås") won't match yours as-is. Find your
+# (based on "Exempelgatan 1, Exempelstad") won't match yours as-is. Find your
 # real ones under Settings -> Devices & services -> VafabMiljö -> your
-# address -> Entities, then replace the `oster_raby_11_vasteras` part.
+# address -> Entities, then replace the `exempelgatan_1_exempelstad` part.
 #
 # To use: Settings -> Dashboards -> Add dashboard -> Take control -> paste
 # this in the YAML editor (top-right menu -> Edit in YAML).
@@ -16,31 +16,52 @@ views:
       - type: entities
         title: Next pickup
         entities:
-          - entity: sensor.oster_raby_11_vasteras_matavfall
-          - entity: sensor.oster_raby_11_vasteras_restavfall
-          - entity: sensor.oster_raby_11_vasteras_plast_och_papper
+          - entity: sensor.exempelgatan_1_exempelstad_matavfall
+          - entity: sensor.exempelgatan_1_exempelstad_restavfall
+          - entity: sensor.exempelgatan_1_exempelstad_plast_och_papper
 
       - type: entities
         title: Put the bins out tonight?
         entities:
-          - entity: binary_sensor.oster_raby_11_vasteras_matavfall_tomorrow
-          - entity: binary_sensor.oster_raby_11_vasteras_restavfall_tomorrow
-          - entity: binary_sensor.oster_raby_11_vasteras_plast_och_papper_tomorrow
+          - entity: binary_sensor.exempelgatan_1_exempelstad_matavfall_tomorrow
+          - entity: binary_sensor.exempelgatan_1_exempelstad_restavfall_tomorrow
+          - entity: binary_sensor.exempelgatan_1_exempelstad_plast_och_papper_tomorrow
 
       - type: entities
         title: Notifications
         entities:
-          - entity: switch.oster_raby_11_vasteras_waste_pickup_notifications
-          - entity: switch.oster_raby_11_vasteras_operational_information_notifications
-          - entity: switch.oster_raby_11_vasteras_news_notifications
-          - entity: time.oster_raby_11_vasteras_reminder_time
-          - entity: time.oster_raby_11_vasteras_notification_time
+          - entity: switch.exempelgatan_1_exempelstad_waste_pickup_notifications
+          - entity: switch.exempelgatan_1_exempelstad_operational_information_notifications
+          - entity: switch.exempelgatan_1_exempelstad_news_notifications
+          - entity: time.exempelgatan_1_exempelstad_reminder_time
+          - entity: time.exempelgatan_1_exempelstad_notification_time
 
       # Everything below needs BankID connected (see the README) - remove
       # this card if you skipped that during setup.
       - type: entities
         title: Account
         entities:
-          - entity: sensor.oster_raby_11_vasteras_latest_invoice
-          - entity: sensor.oster_raby_11_vasteras_property
-          - entity: binary_sensor.oster_raby_11_vasteras_bankid_connected
+          - entity: sensor.exempelgatan_1_exempelstad_latest_invoice
+          - entity: sensor.exempelgatan_1_exempelstad_property
+          - entity: binary_sensor.exempelgatan_1_exempelstad_bankid_connected
+
+      # Full invoice history, from the "invoices" attribute on the
+      # latest-invoice sensor. Built-in markdown card, no custom card needed.
+      # See automation.yaml for a button that downloads the latest one.
+      - type: markdown
+        title: Invoices
+        content: >-
+          {% for inv in state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices') or [] %}
+          - **{{ inv.amount }} kr** ({{ inv.invoice_date }}, due {{ inv.due_date }}) - {{ inv.payment_status }} (id: {{ inv.id }})
+          {% endfor %}
+
+      - type: tile
+        entity: sensor.exempelgatan_1_exempelstad_latest_invoice
+        name: Download latest invoice
+        icon: mdi:file-pdf-box
+        tap_action:
+          action: perform-action
+          perform_action: vafabmiljo.download_invoice
+          data:
+            invoice_id: >-
+              {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].id }}
