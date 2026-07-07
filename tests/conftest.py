@@ -76,6 +76,7 @@ def _install_stub_homeassistant() -> None:
             self.data: dict[str, Any] = {}
             self.services = _ServiceRegistry()
             self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts))
+            self.scheduled_jobs: list[Any] = []
 
         def async_create_task(self, coro, name=None):
             return asyncio.ensure_future(coro)
@@ -285,6 +286,18 @@ def _install_stub_homeassistant() -> None:
     update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
     update_coordinator.CoordinatorEntity = CoordinatorEntity
     sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator
+
+    event_mod = types.ModuleType("homeassistant.helpers.event")
+
+    def async_call_later(hass, delay, action):
+        # Real HA schedules `action` to fire after `delay` on the event loop;
+        # for tests, just record it so a test can invoke it directly to
+        # simulate the timer firing, rather than actually waiting.
+        hass.scheduled_jobs.append(action)
+        return lambda: None
+
+    event_mod.async_call_later = async_call_later
+    sys.modules["homeassistant.helpers.event"] = event_mod
 
     restore_state = types.ModuleType("homeassistant.helpers.restore_state")
 
