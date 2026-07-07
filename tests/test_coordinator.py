@@ -83,6 +83,32 @@ async def test_expired_session_triggers_reauth():
         await _make_coordinator(client)._async_update_data()
 
 
+async def test_keep_alive_called_before_account_data(caplog):
+    # Matches the real app's own behavior of extending the session
+    # periodically - not a workaround for anything (see coordinator.py).
+    client = _authenticated_client()
+
+    await _make_coordinator(client)._async_update_data()
+
+    client.keep_alive.assert_awaited_once()
+
+
+async def test_keep_alive_failure_is_tolerated(caplog):
+    client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoError("boom")))
+
+    data = await _make_coordinator(client)._async_update_data()
+
+    assert data.authenticated is True
+    assert "Failed to keep the BankID session alive: boom" in caplog.text
+
+
+async def test_keep_alive_auth_error_triggers_reauth():
+    client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await _make_coordinator(client)._async_update_data()
+
+
 async def test_authenticated_account_fetch_failure_is_tolerated(caplog):
     # invoices/sanitation/properties/orders/complaints are independent - one
     # endpoint stuck or failing (e.g. an account whose /services/invoices
