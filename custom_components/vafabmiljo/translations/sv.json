@@ -93,6 +93,9 @@
     "time": {
       "reminder_time": {
         "name": "Påminnelsetid"
+      },
+      "notify_time": {
+        "name": "Aviseringstid"
       }
     }
   }

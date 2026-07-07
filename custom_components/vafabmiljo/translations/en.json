@@ -93,6 +93,9 @@
     "time": {
       "reminder_time": {
         "name": "Reminder time"
+      },
+      "notify_time": {
+        "name": "Notification time"
       }
     }
   }

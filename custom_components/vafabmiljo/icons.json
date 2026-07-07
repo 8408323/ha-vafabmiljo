@@ -33,6 +33,9 @@
     "time": {
       "reminder_time": {
         "default": "mdi:clock-alert-outline"
+      },
+      "notify_time": {
+        "default": "mdi:clock-check-outline"
       }
     }
   }

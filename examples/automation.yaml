@@ -1,0 +1,51 @@
+# Example automations built on the VafabMiljö entities. This integration
+# never sends notifications or controls anything itself - the per-bin-type
+# "X tomorrow" binary sensors and the Notification time entity are just the
+# building blocks; what you do with them (a notify service call, a light,
+# both) is entirely up to your own automations.
+#
+# Replace the entity IDs with your own - see dashboard.yaml for how to find
+# them.
+
+automation:
+  # A phone notification independent of (and possibly at a different time
+  # than) the app's own reminder.
+  - alias: "VafabMiljö - notify about tomorrow's pickup"
+    trigger:
+      - platform: time
+        at: time.oster_raby_11_vasteras_notification_time
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: binary_sensor.oster_raby_11_vasteras_matavfall_tomorrow
+            state: "on"
+          - condition: state
+            entity_id: binary_sensor.oster_raby_11_vasteras_restavfall_tomorrow
+            state: "on"
+          - condition: state
+            entity_id: binary_sensor.oster_raby_11_vasteras_plast_och_papper_tomorrow
+            state: "on"
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "Waste collection tomorrow"
+          message: "Remember to put the bins out tonight."
+
+  # A light turning red as a visual cue - e.g. by the front door, in the
+  # kitchen, wherever's useful - when Restavfall specifically needs to go
+  # out. Swap the color/entity per bin type if you want different cues.
+  - alias: "VafabMiljö - light cue for Restavfall tomorrow"
+    trigger:
+      - platform: time
+        at: time.oster_raby_11_vasteras_notification_time
+    condition:
+      - condition: state
+        entity_id: binary_sensor.oster_raby_11_vasteras_restavfall_tomorrow
+        state: "on"
+    action:
+      - service: light.turn_on
+        target:
+          entity_id: light.hallway
+        data:
+          color_name: red
