@@ -103,6 +103,13 @@ Call these from **Developer Tools → Actions** or in automations.
 |---------|---------------|
 | `vafabmiljo.download_invoice` | Fetches one invoice as a PDF (`invoice_id` from the **Latest invoice** sensor's `invoices` attribute) and saves it to `/config/www/vafabmiljo/`, returning the local URL |
 
+`www/` is served over plain HTTP with no authentication - anyone who has (or
+guesses) the URL can fetch it, HA session or not. To limit that, the file is
+saved under a random, unguessable name (not the invoice number) and deleted
+automatically after 10 minutes, rather than kept around indefinitely at a
+predictable path. Download it promptly; a second call to the service just
+generates a fresh copy.
+
 ## Known limitations
 
 - Address search is server-side (`?address=<query>`) - the backend currently throws a SQL
