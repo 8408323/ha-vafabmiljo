@@ -43,6 +43,11 @@ Available in English and Swedish, matching HA's own language setting.
   needs at least one real character typed.
 - BankID sessions expire after a period of inactivity; when that happens the integration
   will ask you to reauthenticate via HA's usual reauth flow (needs another QR scan).
+- The BankID QR shown during setup is a single snapshot and doesn't visually rotate while
+  waiting for you to scan it - HA has no supported way to update a progress step's displayed
+  content mid-task without risking [a core bug](https://github.com/home-assistant/core/issues/95749)
+  where the flow advances before it should. Scan it before the underlying BankID session
+  itself expires (a few minutes).
 - Order/complaint *submission* isn't implemented - only their read-only "available
   actions" templates were ever captured, never an actual submit call, so we won't guess
   at that wire format. The "Available orders"/"Available complaints" sensors just report

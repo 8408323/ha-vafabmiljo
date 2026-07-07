@@ -56,8 +56,11 @@ REMINDER_TIME_FIELD = "time"
 PENDING_POLL_INTERVAL = 2
 PENDING_POLL_TIMEOUT = 30
 
-# BankID status poll cadence while a config flow waits for the user to scan.
+# BankID status poll cadence while a config flow waits for the user to scan,
+# and how long to keep polling before giving up (BankID sessions themselves
+# expire well before this).
 BANKID_POLL_INTERVAL = 2
+BANKID_POLL_TIMEOUT = 300
 
 # Options-flow key: user-configurable poll interval, in minutes.
 CONF_SCAN_INTERVAL = "scan_interval"
