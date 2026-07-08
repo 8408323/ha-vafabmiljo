@@ -82,6 +82,19 @@ views:
           - entity: time.exempelgatan_1_exempelstad_reminder_time
           - entity: time.exempelgatan_1_exempelstad_notification_time
 
+      # These control VafabMiljö's own push notifications (server-side, via
+      # the switches above). The toggles below are a separate, HA-side
+      # layer - who on this dashboard gets pinged by our own automations
+      # (see automation.yaml) for a pickup reminder or a new invoice.
+      - type: entities
+        title: HA notifications (per person)
+        icon: mdi:account-alert-outline
+        entities:
+          - entity: input_boolean.notify_jonathan_pickup_reminder
+          - entity: input_boolean.notify_jonathan_new_invoice
+          - entity: input_boolean.notify_maria_pickup_reminder
+          - entity: input_boolean.notify_maria_new_invoice
+
       # Everything below needs BankID connected (see the README) - remove
       # these cards if you skipped that during setup.
       - type: entities

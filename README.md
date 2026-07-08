@@ -88,12 +88,15 @@ triggers HA's usual reauth flow (needs another QR scan).
 ## HA-side notifications, dashboard, and automations
 
 This integration doesn't send any notification or control anything itself - the
-per-bin-type binary sensors ("Matavfall tomorrow", etc.) and the **Notification time**
-entity are just the building blocks. The Notification time is entirely local to HA,
-independent of BankID and of the app's own "Reminder time" - use it (or the binary
-sensors directly) as the trigger for your own automations: a phone notification, a light
-turning a color as a visual cue, whatever you want. See [`examples/`](examples/) for a
-starter dashboard and a couple of automations, including exactly that light-cue idea.
+per-bin-type binary sensors ("Matavfall tomorrow", etc.), the **Notification time**
+entity, and the **Latest invoice** sensor (via its `invoice_count` attribute) are just
+the building blocks. The Notification time is entirely local to HA, independent of
+BankID and of the app's own "Reminder time" - use it (or the binary sensors directly) as
+the trigger for your own automations: a phone notification, a light turning a color as a
+visual cue, whatever you want. See [`examples/`](examples/) for a starter dashboard and
+a couple of automations, including a light-cue idea, a "new invoice available" notify
+automation, and per-person `input_boolean` toggles so a household can control who gets
+notified about what without touching automation YAML.
 
 ## Services
 
