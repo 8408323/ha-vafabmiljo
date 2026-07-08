@@ -1,11 +1,32 @@
 # Example automations built on the VafabMiljö entities. This integration
 # never sends notifications or controls anything itself - the per-bin-type
-# "X tomorrow" binary sensors and the Notification time entity are just the
-# building blocks; what you do with them (a notify service call, a light,
-# both) is entirely up to your own automations.
+# "X tomorrow" binary sensors, the Notification time entity, and the Latest
+# invoice sensor are just the building blocks; what you do with them (a
+# notify service call, a light, both) is entirely up to your own
+# automations.
 #
 # Replace the entity IDs with your own - see dashboard.yaml for how to find
 # them.
+
+# One toggle per person per notification type, rather than an all-or-nothing
+# switch - each automation below checks the relevant toggle before calling
+# that person's notify service, so a household can decide individually who
+# gets pinged about what. Add via Settings -> Devices & services -> Helpers
+# -> Add helper -> Toggle (or paste this block in as-is if you're editing
+# YAML directly).
+input_boolean:
+  notify_jonathan_pickup_reminder:
+    name: "Jonathan: waste pickup reminder"
+    icon: mdi:bell-outline
+  notify_jonathan_new_invoice:
+    name: "Jonathan: new invoice"
+    icon: mdi:file-document-outline
+  notify_maria_pickup_reminder:
+    name: "Maria: waste pickup reminder"
+    icon: mdi:bell-outline
+  notify_maria_new_invoice:
+    name: "Maria: new invoice"
+    icon: mdi:file-document-outline
 
 automation:
   # A phone notification independent of (and possibly at a different time
@@ -27,10 +48,57 @@ automation:
             entity_id: binary_sensor.exempelgatan_1_exempelstad_plast_och_papper_tomorrow
             state: "on"
     action:
-      - service: notify.mobile_app_your_phone
-        data:
-          title: "Waste collection tomorrow"
-          message: "Remember to put the bins out tonight."
+      - if:
+          - condition: state
+            entity_id: input_boolean.notify_jonathan_pickup_reminder
+            state: "on"
+        then:
+          - service: notify.mobile_app_jonathan_phone
+            data:
+              title: "Waste collection tomorrow"
+              message: "Remember to put the bins out tonight."
+      - if:
+          - condition: state
+            entity_id: input_boolean.notify_maria_pickup_reminder
+            state: "on"
+        then:
+          - service: notify.mobile_app_maria_phone
+            data:
+              title: "Waste collection tomorrow"
+              message: "Remember to put the bins out tonight."
+
+  # Fires when VafabMiljö issues a new invoice, rather than only ever
+  # checking on your own schedule. `invoice_count` only goes up when a new
+  # invoice actually appears - the invoice amount alone isn't a safe trigger
+  # since two invoices can coincidentally have the same amount.
+  - alias: "VafabMiljö - notify about new invoice"
+    trigger:
+      - platform: state
+        entity_id: sensor.exempelgatan_1_exempelstad_latest_invoice
+        attribute: invoice_count
+    action:
+      - if:
+          - condition: state
+            entity_id: input_boolean.notify_jonathan_new_invoice
+            state: "on"
+        then:
+          - service: notify.mobile_app_jonathan_phone
+            data:
+              title: "New invoice from VafabMiljö"
+              message: >-
+                SEK {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].amount }}
+                - due {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].due_date.split('T')[0] }}
+      - if:
+          - condition: state
+            entity_id: input_boolean.notify_maria_new_invoice
+            state: "on"
+        then:
+          - service: notify.mobile_app_maria_phone
+            data:
+              title: "New invoice from VafabMiljö"
+              message: >-
+                SEK {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].amount }}
+                - due {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].due_date.split('T')[0] }}
 
   # A different light color per bin type - one automation per type, each
   # gated on that type's own "tomorrow" binary sensor. All three can fire
