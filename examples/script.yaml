@@ -23,32 +23,29 @@ download_vafab_invoice:
     - action: vafabmiljo.download_invoice
       data:
         invoice_id: >-
-          {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[invoice_index | int(0)].id }}
+          {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[(invoice_index | default(0)) | int(0)].id }}
       response_variable: result
     # The service call above succeeds silently - fine on a desktop browser
     # where you can watch the tile, but from the phone app tapping the tile
     # looks like nothing happened at all. A notification with a direct link
     # gives it something to tap.
     #
-    # Call as notify.send_message with a target entity_id, not as
-    # notify.<device> directly - HA's mobile_app notify targets are entities
-    # under the generic notify domain (since the 2024.11 notify platform
-    # migration), not their own callable services. The old per-device
-    # service-name style silently doesn't exist and errors the whole script
-    # ("Action notify.<device> not found") - found this live, since it
-    # failed exactly this way after the first entity-only device rename.
-    # Replace notify.your_phone with your own notify.<device> entity
-    # (Settings -> People -> your user -> find the exact name, or check
-    # Developer Tools -> Actions).
+    # Use the legacy per-device notify.<device> service (e.g.
+    # notify.mobile_app_your_phone), not notify.send_message - the newer
+    # entity-based notify.send_message action (post-2024.11 notify platform
+    # migration) only accepts message/title, and rejects a nested `data:`
+    # sub-key ("extra keys not allowed @ data['data']"), which is what
+    # carries the tap-to-open URL for the companion app. The old per-device
+    # service is still registered alongside the new entity and does accept
+    # it - confirmed live. Find your exact service name under Settings ->
+    # People -> your user, or Developer Tools -> Actions.
     #
     # `result.path` is relative (e.g. /local/vafabmiljo/<name>.pdf) - the
     # companion app resolves that against whatever server it's connected to,
     # which is normally what you want. If tapping the notification doesn't
     # open it, use the full external URL instead, e.g.
     # "https://your-ha-domain{{ result.path }}".
-    - action: notify.send_message
-      target:
-        entity_id: notify.your_phone
+    - action: notify.mobile_app_your_phone
       data:
         title: "Invoice ready"
         message: "Tap to open the PDF (deleted in 10 minutes)"
