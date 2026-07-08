@@ -119,14 +119,55 @@ views:
 
       # Calls the script in script.yaml, not the service directly - a tile's
       # tap_action doesn't template its `data:` fields, so figuring out
-      # "which invoice is the latest one" has to happen in a script instead.
-      - type: tile
-        entity: sensor.exempelgatan_1_exempelstad_latest_invoice
-        name: Download latest invoice
-        icon: mdi:file-pdf-box
-        tap_action:
-          action: perform-action
-          perform_action: script.download_latest_vafab_invoice
+      # "which invoice that index maps to" has to happen in a script
+      # instead. A plain static value like `invoice_index: 1` below is fine
+      # though - it's only a Jinja *expression* in tap_action data that
+      # doesn't get evaluated, not literal data.
+      #
+      # One tile per recent invoice (matching the Invoices table above,
+      # most recent first) rather than just the latest - add or remove
+      # entries here to match how many invoices you want downloadable at a
+      # glance.
+      - type: grid
+        columns: 4
+        square: false
+        cards:
+          - type: tile
+            entity: sensor.exempelgatan_1_exempelstad_latest_invoice
+            name: Invoice 1 (latest)
+            icon: mdi:file-pdf-box
+            tap_action:
+              action: perform-action
+              perform_action: script.download_vafab_invoice
+              data:
+                invoice_index: 0
+          - type: tile
+            entity: sensor.exempelgatan_1_exempelstad_latest_invoice
+            name: Invoice 2
+            icon: mdi:file-pdf-box
+            tap_action:
+              action: perform-action
+              perform_action: script.download_vafab_invoice
+              data:
+                invoice_index: 1
+          - type: tile
+            entity: sensor.exempelgatan_1_exempelstad_latest_invoice
+            name: Invoice 3
+            icon: mdi:file-pdf-box
+            tap_action:
+              action: perform-action
+              perform_action: script.download_vafab_invoice
+              data:
+                invoice_index: 2
+          - type: tile
+            entity: sensor.exempelgatan_1_exempelstad_latest_invoice
+            name: Invoice 4
+            icon: mdi:file-pdf-box
+            tap_action:
+              action: perform-action
+              perform_action: script.download_vafab_invoice
+              data:
+                invoice_index: 3
 
       - type: entities
         title: Contract fees
