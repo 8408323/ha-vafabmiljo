@@ -102,14 +102,20 @@ views:
       # (including the header/separator/each row) into one space-joined
       # paragraph, which is exactly what made this render as unformatted
       # text instead of an actual table/list in the first place.
+      #
+      # `-%}` on for/endfor (not just `%}`) - HA's template renderer doesn't
+      # trim the newline after a block tag by default, so without it every
+      # iteration leaves a blank line before its row, which breaks a GFM
+      # table into a bunch of disconnected one-row fragments instead of one
+      # continuous table.
       - type: markdown
         title: Invoices
         content: |-
           | Amount | Invoiced | Due | Status |
           | --- | --- | --- | --- |
-          {% for inv in state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices') or [] %}
+          {% for inv in state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices') or [] -%}
           | {{ inv.amount }} kr | {{ inv.invoice_date.split('T')[0] }} | {{ inv.due_date.split('T')[0] }} | {{ inv.payment_status }} |
-          {% endfor %}
+          {% endfor -%}
 
       # Calls the script in script.yaml, not the service directly - a tile's
       # tap_action doesn't template its `data:` fields, so figuring out
