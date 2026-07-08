@@ -13,29 +13,40 @@
 # that person's notify service, so a household can decide individually who
 # gets pinged about what. Add via Settings -> Devices & services -> Helpers
 # -> Add helper -> Toggle (or paste this block in as-is if you're editing
-# YAML directly).
+# YAML directly). Replace "person_a"/"person_b" with your household's names.
 input_boolean:
-  notify_jonathan_pickup_reminder:
-    name: "Jonathan: waste pickup reminder"
+  notify_person_a_pickup_reminder:
+    name: "Person A: waste pickup reminder"
     icon: mdi:bell-outline
-  notify_jonathan_new_invoice:
-    name: "Jonathan: new invoice"
+  notify_person_a_new_invoice:
+    name: "Person A: new invoice"
     icon: mdi:file-document-outline
-  notify_maria_pickup_reminder:
-    name: "Maria: waste pickup reminder"
+  notify_person_b_pickup_reminder:
+    name: "Person B: waste pickup reminder"
     icon: mdi:bell-outline
-  notify_maria_new_invoice:
-    name: "Maria: new invoice"
+  notify_person_b_new_invoice:
+    name: "Person B: new invoice"
     icon: mdi:file-document-outline
 
 automation:
   # A phone notification independent of (and possibly at a different time
   # than) the app's own reminder.
+  #
+  # Trigger is time_pattern + a template condition, not a plain `platform:
+  # time` with `at:` pointing at the Notification time entity - HA's time
+  # trigger only accepts entities from the `input_datetime` or `sensor`
+  # domain for a dynamic `at:`, not the `time` domain this integration's
+  # Notification time entity actually is. Pointing `at:` straight at it
+  # parses fine in the UI but fails schema validation at runtime, silently
+  # leaving the automation permanently "unavailable" - confirmed live.
   - alias: "VafabMiljö - notify about tomorrow's pickup"
     trigger:
-      - platform: time
-        at: time.exempelgatan_1_exempelstad_notification_time
+      - platform: time_pattern
+        minutes: "*"
     condition:
+      - condition: template
+        value_template: >-
+          {{ now().strftime('%H:%M') == states('time.exempelgatan_1_exempelstad_notification_time')[0:5] }}
       - condition: or
         conditions:
           - condition: state
@@ -50,19 +61,19 @@ automation:
     action:
       - if:
           - condition: state
-            entity_id: input_boolean.notify_jonathan_pickup_reminder
+            entity_id: input_boolean.notify_person_a_pickup_reminder
             state: "on"
         then:
-          - service: notify.mobile_app_jonathan_phone
+          - service: notify.mobile_app_person_a_phone
             data:
               title: "Waste collection tomorrow"
               message: "Remember to put the bins out tonight."
       - if:
           - condition: state
-            entity_id: input_boolean.notify_maria_pickup_reminder
+            entity_id: input_boolean.notify_person_b_pickup_reminder
             state: "on"
         then:
-          - service: notify.mobile_app_maria_phone
+          - service: notify.mobile_app_person_b_phone
             data:
               title: "Waste collection tomorrow"
               message: "Remember to put the bins out tonight."
@@ -79,10 +90,10 @@ automation:
     action:
       - if:
           - condition: state
-            entity_id: input_boolean.notify_jonathan_new_invoice
+            entity_id: input_boolean.notify_person_a_new_invoice
             state: "on"
         then:
-          - service: notify.mobile_app_jonathan_phone
+          - service: notify.mobile_app_person_a_phone
             data:
               title: "New invoice from VafabMiljö"
               message: >-
@@ -90,10 +101,10 @@ automation:
                 - due {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].due_date.split('T')[0] }}
       - if:
           - condition: state
-            entity_id: input_boolean.notify_maria_new_invoice
+            entity_id: input_boolean.notify_person_b_new_invoice
             state: "on"
         then:
-          - service: notify.mobile_app_maria_phone
+          - service: notify.mobile_app_person_b_phone
             data:
               title: "New invoice from VafabMiljö"
               message: >-
