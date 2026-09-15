@@ -52,6 +52,11 @@ def _store_key(entry: ConfigEntry) -> str:
     return f"{DOMAIN}.{entry.entry_id}.invoices"
 
 
+def _removed_store_keys(hass: HomeAssistant) -> set[str]:
+    """Stores deleted by entry removal; entry_ids are never reused, so this only grows."""
+    return hass.data.setdefault(f"{DOMAIN}_invoice_stores_removed", set())
+
+
 def _store_lock(hass: HomeAssistant, key: str) -> asyncio.Lock:
     """One lock per store, shared across notifier instances of the same entry.
 
@@ -67,6 +72,9 @@ async def async_remove_invoice_store(hass: HomeAssistant, entry: ConfigEntry) ->
     """Delete the per-entry persisted state when the entry itself is removed."""
     key = _store_key(entry)
     async with _store_lock(hass, key):
+        # Marked before the delete and under the same lock, so a check still
+        # queued behind it cannot write the state back afterwards.
+        _removed_store_keys(hass).add(key)
         await Store(hass, INVOICE_STORAGE_VERSION, key).async_remove()
 
 
@@ -208,10 +216,11 @@ class VafabMiljoInvoiceNotifier:
             if stored is not None:
                 _LOGGER.warning("Ignoring malformed persisted invoice state (%s)", type(stored).__name__)
             stored = None
-        if stored is not None and stored.get("plant_id") not in (None, self._plant_id):
-            # The entry was reconfigured to another address (same entry_id):
-            # the old property's announced/reminded/cached state must not
-            # carry over. Keep only the user's reminder time.
+        if stored is not None and stored.get("plant_id") != self._plant_id:
+            # Either reconfigured to another address (same entry_id) or a
+            # truncated store with no binding at all: the old property's
+            # announced/reminded/cached state must not carry over. Keep only
+            # the user's reminder time.
             _LOGGER.debug("Bound property changed; resetting persisted invoice state")
             stored = {"reminder_time": stored.get("reminder_time")}
             # Persist the sanitized state right away rather than only with the
@@ -344,6 +353,10 @@ class VafabMiljoInvoiceNotifier:
         snapshot = list(self._last_invoices)
         gen = self._gen
         async with self._lock:
+            if self._store.key in _removed_store_keys(self._hass):
+                # Entry removal deleted this store while we waited for the
+                # lock; writing now would resurrect it.
+                return
             await self._store.async_save(
                 {
                     "plant_id": self._plant_id,
@@ -396,9 +409,11 @@ class VafabMiljoInvoiceNotifier:
                 # whose save failed must be retried too, or a restart would
                 # reload stale data and could schedule a settled invoice.
                 await self._async_save()
-            if self._last_invoices and (flushed or self._unsub_timer is None):
+            if flushed or (self._unsub_timer is None and self._last_invoices):
                 # A snapshot that only now reached disk may name a nearer
-                # invoice than the armed timer, which was computed before it.
+                # invoice than the armed timer, which was computed before it -
+                # or no invoice at all, in which case the stale timer has to be
+                # cancelled rather than left to fire.
                 await self._async_schedule_reminder()
             return
         if not self._seeded:
@@ -467,6 +482,12 @@ class VafabMiljoInvoiceNotifier:
         self._timer_token += 1
         self.pending_reminder_invoice_id = None
 
+    def _remind_at(self, due: date) -> datetime:
+        """The local reminder moment for an invoice due on `due` (the day before)."""
+        return dt_util.start_of_local_day(due - timedelta(days=1)) + timedelta(
+            hours=self._reminder_time.hour, minutes=self._reminder_time.minute, seconds=self._reminder_time.second
+        )
+
     def _invoice_by_id(self, invoice_id: int) -> dict[str, Any] | None:
         return next((inv for inv in self._invoices() if inv["id"] == invoice_id), None)
 
@@ -496,9 +517,7 @@ class VafabMiljoInvoiceNotifier:
         if candidate is None:
             return
         inv, due = candidate
-        remind_at = dt_util.start_of_local_day(due - timedelta(days=1)) + timedelta(
-            hours=self._reminder_time.hour, minutes=self._reminder_time.minute, seconds=self._reminder_time.second
-        )
+        remind_at = self._remind_at(due)
         if remind_at <= now:
             # Reminder moment already passed (HA was down, or the reminder time
             # was moved earlier) but the invoice is still not due - send it now
@@ -520,14 +539,23 @@ class VafabMiljoInvoiceNotifier:
                 # _invoices() still serves the cached row, so this finds it.)
                 latest = self._invoice_by_id(inv["id"])
                 latest_due = _parse_date(latest.get("invoiceExpirationDate")) if latest is not None else None
-                if (
+                pending = (
                     latest is not None
                     and not _is_paid(latest)
                     and latest_due is not None
                     and latest_due > dt_util.now().date()
-                ):
+                )
+                if pending and self._remind_at(latest_due) <= dt_util.now():
                     self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(latest))
                     _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
+                elif pending:
+                    # The due date moved further out while the marker was being
+                    # written, so its day-before moment has not arrived after
+                    # all. Release the marker; the scheduling pass below arms a
+                    # timer for the new date instead.
+                    self._reminded.discard(inv["id"])
+                    self._mark_dirty()
+                    _LOGGER.debug("Invoice %s due date moved; reminder rescheduled", inv["id"])
                 else:
                     _LOGGER.debug("Invoice %s settled while persisting; reminder skipped", inv["id"])
                 settled = True

@@ -1104,6 +1104,113 @@ async def test_flushed_snapshot_recomputes_an_already_armed_timer():
     assert notifier.pending_reminder_invoice_id == 2
 
 
+async def test_store_without_a_matching_binding_is_not_trusted():
+    hass = HomeAssistant()
+    hass.data["_stores"] = {
+        "vafabmiljo.test_entry.invoices": {
+            # No plant_id: truncated, or written for another property.
+            "seeded": True,
+            "announced": [99],
+            "reminded": [],
+            "reminder_time": "07:00:00",
+            "invoices": [],
+        }
+    }
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1), _inv(2)]))
+    await notifier.async_setup()
+    assert _events(hass, EVENT_NEW_INVOICE) == []  # re-baselined, history not announced
+    assert notifier.announced_count == 2
+    assert 99 not in notifier._announced
+    assert notifier.reminder_time == time(7, 0)  # the user's own setting survives
+
+
+async def test_save_queued_behind_entry_removal_does_not_resurrect_the_store():
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, _ = await _setup(hass, [_inv(1)])
+    assert "vafabmiljo.test_entry.invoices" in hass.data["_stores"]
+
+    gate = asyncio.Event()
+
+    async def hold_store_lock():
+        async with notifier._lock:
+            await gate.wait()
+
+    holder = asyncio.ensure_future(hold_store_lock())
+    await asyncio.sleep(0)
+
+    # Removal queues on the store lock first, a save behind it.
+    remove = asyncio.ensure_future(async_remove_invoice_store(hass, _entry()))
+    await asyncio.sleep(0)
+    notifier._announced.add(42)
+    notifier._mark_dirty()
+    save = asyncio.ensure_future(notifier._async_save())
+    await asyncio.sleep(0)
+
+    gate.set()
+    await holder
+    await remove
+    await save
+
+    # The save must have been refused rather than writing the state back.
+    assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
+async def test_emptied_snapshot_cancels_a_stale_timer_on_the_retry():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, due="2026-12-01T00:00:00")])
+    assert notifier.pending_reminder_invoice_id == 1
+    original = notifier._store.async_save
+
+    async def boom(data):
+        raise OSError("disk full")
+
+    # A valid poll empties the account, but its save fails.
+    notifier._store.async_save = boom
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": []})
+    with pytest.raises(OSError):
+        await notifier._async_check()
+
+    # Endpoint down: the retried flush must cancel the now-meaningless timer.
+    notifier._store.async_save = original
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=None)
+    await notifier._async_check()
+    assert notifier.pending_reminder_invoice_id is None
+    assert hass.scheduled_timers == []
+
+
+async def test_due_date_moved_during_the_write_reschedules_instead_of_firing():
+    import asyncio
+
+    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)  # catch-up path
+    hass = HomeAssistant()
+    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    original = notifier._store.async_save
+    calls = {"n": 0}
+
+    async def move_due_midwrite(data):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the reminder marker write
+            coordinator.data = VafabMiljoData(
+                pickups=[], authenticated=True, invoices={"data": [_inv(1, due="2026-10-05T00:00:00")]}
+            )
+        await asyncio.sleep(0)
+        await original(data)
+
+    notifier._store.async_save = move_due_midwrite
+    await notifier.async_setup()
+    notifier._store.async_save = original
+
+    # Its day-before moment has not arrived after all, so nothing is delivered
+    # and the marker is released for the new date.
+    assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
+    assert notifier.reminded_count == 0
+    assert notifier.pending_reminder_invoice_id == 1
+    assert hass.scheduled_timers[0][1] == datetime(2026, 10, 4, 18, 0, tzinfo=timezone.utc)
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])
