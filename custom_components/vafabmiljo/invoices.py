@@ -246,10 +246,15 @@ class VafabMiljoInvoiceNotifier:
             self._seeded = (
                 stored.get("seeded") is True and announced is not None and reminded is not None and invoices is not None
             )
-            self._announced = announced if announced is not None else set()
-            self._reminded = reminded if reminded is not None else set()
-            self._last_invoices = invoices if invoices is not None else []
-            self._stored_invoices = list(self._last_invoices)
+            if self._seeded:
+                self._announced = announced
+                self._reminded = reminded
+                self._last_invoices = invoices
+                self._stored_invoices = list(invoices)
+            # Otherwise nothing here is trustworthy: keeping a "reminded" entry
+            # from an untrusted store would suppress a reminder no trusted
+            # state says was ever delivered. Only the user's own reminder time
+            # is carried over, below.
             if stored.get("reminder_time"):
                 try:
                     self._reminder_time = time.fromisoformat(stored["reminder_time"])
@@ -349,14 +354,15 @@ class VafabMiljoInvoiceNotifier:
             self._last_invoices = [_slim(inv) for inv in self._coordinator.data.invoice_items]
         return self._last_invoices
 
-    async def _async_save(self) -> None:
+    async def _async_save(self) -> bool:
+        """Persist the current state. False means the write was refused, not durable."""
         snapshot = list(self._last_invoices)
         gen = self._gen
         async with self._lock:
             if self._store.key in _removed_store_keys(self._hass):
                 # Entry removal deleted this store while we waited for the
                 # lock; writing now would resurrect it.
-                return
+                return False
             await self._store.async_save(
                 {
                     "plant_id": self._plant_id,
@@ -371,6 +377,7 @@ class VafabMiljoInvoiceNotifier:
         # next check retries it.
         self._stored_invoices = snapshot
         self._saved_gen = max(self._saved_gen, gen)
+        return True
 
     async def _async_check(self) -> None:
         async with self._work_lock:
@@ -440,7 +447,11 @@ class VafabMiljoInvoiceNotifier:
             self._mark_dirty()
             delivered = False
             try:
-                await self._async_save()
+                if not await self._async_save():
+                    # The store is gone (entry removed): a removed entry must
+                    # not announce anything, and the finally below releases the
+                    # markers.
+                    return
                 # The backend lists newest first; announce oldest-first so a
                 # burst of several new invoices arrives in chronological order.
                 for inv in reversed(new):
@@ -526,7 +537,8 @@ class VafabMiljoInvoiceNotifier:
             self._mark_dirty()
             settled = False
             try:
-                await self._async_save()
+                if not await self._async_save():
+                    return
                 # A coordinator refresh is not held by the work lock and can
                 # replace the snapshot while that write is in flight, so the
                 # candidate is re-read before it is announced: an invoice paid

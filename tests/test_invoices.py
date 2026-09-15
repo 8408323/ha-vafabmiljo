@@ -1211,6 +1211,61 @@ async def test_due_date_moved_during_the_write_reschedules_instead_of_firing():
     assert hass.scheduled_timers[0][1] == datetime(2026, 10, 4, 18, 0, tzinfo=timezone.utc)
 
 
+async def test_no_event_is_fired_when_the_save_was_refused():
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(4)]})
+
+    # Entry removal deletes the store; a check already past its unload checks
+    # then finds its write refused.
+    await async_remove_invoice_store(hass, _entry())
+    await notifier._async_check()
+    await asyncio.sleep(0)
+
+    # A removed entry announces nothing, and no marker is left claiming it did.
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+    assert 4 not in notifier._announced
+    assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
+async def test_no_catch_up_reminder_when_the_save_was_refused():
+    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)  # catch-up path
+    hass = HomeAssistant()
+    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+
+    # The store is gone before the notifier ever writes to it.
+    await async_remove_invoice_store(hass, _entry())
+    await notifier.async_setup()
+
+    assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
+    assert notifier.reminded_count == 0
+    assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
+async def test_untrusted_store_contributes_no_markers():
+    hass = HomeAssistant()
+    hass.data["_stores"] = {
+        "vafabmiljo.test_entry.invoices": {
+            "seeded": False,  # never baselined, yet carries markers
+            "plant_id": "p1",
+            "announced": [1],
+            "reminded": [1],
+            "reminder_time": "07:30:00",
+            "invoices": [],
+        }
+    }
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1, due="2026-09-30T00:00:00")]))
+    await notifier.async_setup()
+
+    # The reminder marker must not suppress a reminder nothing proves was sent.
+    assert notifier._reminded == set()
+    assert notifier.pending_reminder_invoice_id == 1
+    assert notifier.reminder_time == time(7, 30)  # the user's own setting is kept
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])
