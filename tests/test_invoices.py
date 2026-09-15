@@ -535,7 +535,7 @@ async def test_pending_marker_save_is_retried_even_when_the_next_poll_fails():
     assert notifier._dirty is False
 
 
-async def test_change_made_during_an_in_flight_save_stays_pending():
+async def test_change_made_during_an_in_flight_save_is_not_lost():
     import asyncio
 
     hass = HomeAssistant()
@@ -555,9 +555,10 @@ async def test_change_made_during_an_in_flight_save_stays_pending():
     notifier._mark_dirty()  # a second change lands while the first save is in flight
     gate.set()
     await first
-    assert notifier._dirty is True  # the first save must not have cleared it
-    notifier._store.async_save = original
-    await notifier._async_check()
+
+    # The in-flight save recorded only the generation it actually wrote, so the
+    # later change stayed pending and the flush at the end of the check
+    # persisted it before the work lock was released.
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [1, 2]
     assert notifier._dirty is False
 
@@ -1015,6 +1016,39 @@ async def test_catch_up_reminder_revalidates_after_the_write(changed, expect_eve
     assert bool(events) is expect_event
     # The marker is kept either way: a settled invoice needs no reminder later.
     assert notifier.reminded_count == 1
+
+
+async def test_snapshot_refreshed_during_a_write_is_flushed_before_the_lock_is_released():
+    import asyncio
+
+    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)  # catch-up path
+    hass = HomeAssistant()
+    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    original = notifier._store.async_save
+    calls = {"n": 0}
+
+    async def refresh_midwrite(data):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the reminder marker write
+            coordinator.data = VafabMiljoData(
+                pickups=[],
+                authenticated=True,
+                invoices={"data": [_inv(2, due="2026-12-01T00:00:00"), _inv(1, due="2026-09-30T00:00:00")]},
+            )
+        await asyncio.sleep(0)
+        await original(data)
+
+    notifier._store.async_save = refresh_midwrite
+    await notifier.async_setup()
+    notifier._store.async_save = original
+
+    # The scheduling pass re-read the newer snapshot; it must not be left
+    # unsaved, or a restart with a failing poll would schedule from stale data.
+    stored = hass.data["_stores"]["vafabmiljo.test_entry.invoices"]
+    assert sorted(inv["id"] for inv in stored["invoices"]) == [1, 2]
+    assert notifier._last_invoices == notifier._stored_invoices
+    assert notifier._dirty is False
 
 
 async def test_unload_is_safe_to_call_twice():

@@ -313,6 +313,7 @@ class VafabMiljoInvoiceNotifier:
                     with contextlib.suppress(Exception):
                         await self._async_schedule_reminder()
             await self._async_schedule_reminder()
+            await self._async_flush_pending()
 
     # -- internals -------------------------------------------------------------
 
@@ -361,6 +362,22 @@ class VafabMiljoInvoiceNotifier:
     async def _async_check(self) -> None:
         async with self._work_lock:
             await self._async_check_locked()
+            await self._async_flush_pending()
+
+    async def _async_flush_pending(self) -> None:
+        """Persist anything left unsaved before the work lock is released.
+
+        Scheduling deliberately re-reads the snapshot (its catch-up branch has
+        to, so a refresh landing during a write cannot deliver stale data), and
+        that re-read can leave a newer invoice list in memory that no save has
+        recorded. Flushing here keeps the persisted cache from going stale,
+        which a restart with a failing poll would otherwise load and schedule
+        from.
+        """
+        if self._unloaded:
+            return
+        if self._dirty or self._last_invoices != self._stored_invoices:
+            await self._async_save()
 
     async def _async_check_locked(self) -> None:
         if self._unloaded:
@@ -523,3 +540,4 @@ class VafabMiljoInvoiceNotifier:
             self._unsub_timer = None
             self.pending_reminder_invoice_id = None
             await self._async_schedule_reminder()
+            await self._async_flush_pending()
