@@ -27,6 +27,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import CONF_ADDRESS, CONF_CITY, CONF_PLANT_ID, DOMAIN, REMINDER_TIME_FIELD
 from .coordinator import VafabMiljoCoordinator
+from .invoices import VafabMiljoInvoiceNotifier
 
 DEFAULT_REMINDER_TIME = time(19, 0)  # matches the backend's own default for a new device
 DEFAULT_NOTIFY_TIME = time(18, 0)
@@ -45,6 +46,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entities: list[TimeEntity] = [VafabMiljoNotifyTimeEntity(entry)]
     if coordinator.data.authenticated:
         entities.append(VafabMiljoReminderTimeEntity(coordinator, entry))
+        if coordinator.invoice_notifier is not None:
+            entities.append(VafabMiljoInvoiceReminderTimeEntity(entry, coordinator.invoice_notifier))
     async_add_entities(entities)
 
 
@@ -54,6 +57,7 @@ class VafabMiljoReminderTimeEntity(TimeEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "reminder_time"
     _attr_assumed_state = True
+    _attr_should_poll = False
 
     def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
@@ -81,6 +85,7 @@ class VafabMiljoNotifyTimeEntity(TimeEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "notify_time"
     _attr_assumed_state = True
+    _attr_should_poll = False
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_notify_time"
@@ -95,3 +100,37 @@ class VafabMiljoNotifyTimeEntity(TimeEntity, RestoreEntity):
     async def async_set_value(self, value: time) -> None:
         self._attr_native_value = value
         self.async_write_ha_state()
+
+
+class VafabMiljoInvoiceReminderTimeEntity(TimeEntity):
+    """Time of day at which the day-before-due invoice reminder is delivered.
+
+    The integration fires `vafabmiljo_invoice_due_reminder` at this time on the
+    day before an unpaid invoice's due date.
+
+    Purely local state, persisted by the invoice notifier itself (not
+    RestoreEntity - the notifier needs the value before any entity exists,
+    right at setup, to schedule the timer).
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "invoice_reminder_time"
+    _attr_should_poll = False  # only changes through its own set_value
+
+    def __init__(self, entry: ConfigEntry, notifier: VafabMiljoInvoiceNotifier) -> None:
+        self._notifier = notifier
+        self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_invoice_reminder_time"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> time:
+        return self._notifier.reminder_time
+
+    async def async_set_value(self, value: time) -> None:
+        try:
+            await self._notifier.async_set_reminder_time(value)
+        finally:
+            # The notifier can persist the new time and still raise while
+            # rescheduling; publish whatever it settled on either way, so the
+            # entity never disagrees with storage.
+            self.async_write_ha_state()

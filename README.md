@@ -72,6 +72,8 @@ Available in English and Swedish, matching HA's own language setting.
   and available order/complaint types
 - Notification-preference switches and reminder-time entity, mirroring the app's own
   settings
+- `vafabmiljo_new_invoice` / `vafabmiljo_invoice_due_reminder` events, fired exactly once
+  per invoice (persisted across restarts), plus a local **Invoice reminder time** entity
 - Diagnostics download and a "BankID connected" sensor
 
 ## Authentication
@@ -87,16 +89,35 @@ triggers HA's usual reauth flow (needs another QR scan).
 
 ## HA-side notifications, dashboard, and automations
 
-This integration doesn't send any notification or control anything itself - the
-per-bin-type binary sensors ("Matavfall tomorrow", etc.), the **Notification time**
-entity, and the **Latest invoice** sensor (via its `invoice_count` attribute) are just
-the building blocks. The Notification time is entirely local to HA, independent of
-BankID and of the app's own "Reminder time" - use it (or the binary sensors directly) as
-the trigger for your own automations: a phone notification, a light turning a color as a
-visual cue, whatever you want. See [`examples/`](examples/) for a starter dashboard and
-a couple of automations, including a light-cue idea, a "new invoice available" notify
-automation, and per-person `input_boolean` toggles so a household can control who gets
-notified about what without touching automation YAML.
+This integration doesn't send any notification or control anything itself - it
+provides the building blocks and your own automations decide what to do with them:
+
+- **Pickup reminders**: the per-bin-type binary sensors ("Matavfall tomorrow", etc.)
+  and the **Notification time** entity (local to HA, independent of BankID and of the
+  app's own "Reminder time").
+- **New invoice**: the integration fires a `vafabmiljo_new_invoice` event on HA's event
+  bus **exactly once per invoice**. The ids it has already announced are persisted in HA
+  storage, so restarts, reloads and failed polls can't re-announce an old invoice, and
+  the first run seeds that list with everything already on the account instead of
+  announcing old history. Use an *event* trigger for this, not a state trigger on the
+  Latest invoice sensor's attributes - a state trigger re-fires every time the entity
+  comes back from unavailable, which is exactly how you end up pinged several times
+  about the same invoice.
+- **Invoice due tomorrow**: the day before an unpaid invoice is due, at the time set on
+  the **Invoice reminder time** entity (default 18:00), the integration fires
+  `vafabmiljo_invoice_due_reminder` - again once per invoice, persisted. Invoices the
+  backend already reports as paid never get a reminder, and if HA was down at the
+  reminder moment it is sent as soon as HA is back, as long as the invoice isn't due yet.
+
+Both events carry `invoice_id`, `amount`, `invoice_date`, `due_date` (`YYYY-MM-DD`),
+`days_until_due`, `payment_status`, `ocr_number`, `address`, `city` and `entry_id` in
+`trigger.event.data`. They are fired for every configured address, so with more than one
+property in HA, filter the trigger with `event_data:` on `address`/`city` (or `entry_id`) as
+the examples do.
+
+See [`examples/`](examples/) for a starter dashboard and automations covering all three,
+including a light-cue idea and per-person `input_boolean` toggles so a household can
+control who gets notified about what without touching automation YAML.
 
 ## Services
 

@@ -153,6 +153,7 @@ def test_invoice_sensor_reports_latest_invoice():
                 "data": [
                     {
                         "item": {
+                            "id": 42,
                             "amount": 500,
                             "invoiceDate": "2026-01-01",
                             "invoiceExpirationDate": "2026-01-31",
@@ -160,7 +161,9 @@ def test_invoice_sensor_reports_latest_invoice():
                             "ocrNumber": "111111111",
                         }
                     },
-                    {"item": {"amount": 450}},
+                    {"item": {"id": 41, "amount": 450}},
+                    {"item": {"amount": 1}},  # no id: dropped by the shared decoder
+                    None,  # junk row: ignored, must not raise
                 ]
             },
         )
@@ -172,7 +175,7 @@ def test_invoice_sensor_reports_latest_invoice():
     invoices = sensor.extra_state_attributes["invoices"]
     assert len(invoices) == 2
     assert invoices[0] == {
-        "id": None,
+        "id": 42,
         "amount": 500,
         "invoice_date": "2026-01-01",
         "due_date": "2026-01-31",

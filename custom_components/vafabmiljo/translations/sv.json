@@ -97,6 +97,9 @@
       },
       "notify_time": {
         "name": "Aviseringstid"
+      },
+      "invoice_reminder_time": {
+        "name": "Påminnelsetid faktura"
       }
     }
   },

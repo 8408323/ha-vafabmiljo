@@ -36,6 +36,9 @@
       },
       "notify_time": {
         "default": "mdi:clock-check-outline"
+      },
+      "invoice_reminder_time": {
+        "default": "mdi:calendar-clock-outline"
       }
     }
   }

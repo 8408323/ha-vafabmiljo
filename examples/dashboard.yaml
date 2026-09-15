@@ -92,8 +92,10 @@ views:
         entities:
           - entity: input_boolean.notify_person_a_pickup_reminder
           - entity: input_boolean.notify_person_a_new_invoice
+          - entity: input_boolean.notify_person_a_invoice_reminder
           - entity: input_boolean.notify_person_b_pickup_reminder
           - entity: input_boolean.notify_person_b_new_invoice
+          - entity: input_boolean.notify_person_b_invoice_reminder
 
       # Everything below needs BankID connected (see the README) - remove
       # these cards if you skipped that during setup.

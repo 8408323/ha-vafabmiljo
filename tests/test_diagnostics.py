@@ -21,10 +21,11 @@ async def test_diagnostics_redacts_identifying_data():
         }
     )
     coordinator = Mock()
+    coordinator.invoice_notifier = None
     coordinator.data = VafabMiljoData(
         pickups=[{"bins": [{"type": "Restavfall"}, {"type": "Matavfall"}]}],
         authenticated=True,
-        invoices={"data": [{"item": {"amount": 1}}, {"item": {"amount": 2}}]},
+        invoices={"data": [{"item": {"id": 1, "amount": 1}}, {"item": {"id": 2, "amount": 2}}, {"item": "junk"}]},
         sanitation={"contracts": [{"id": 1}]},
     )
     entry.runtime_data = coordinator
@@ -41,3 +42,25 @@ async def test_diagnostics_redacts_identifying_data():
     assert result["bin_types"] == ["Matavfall", "Restavfall"]
     assert result["invoice_count"] == 2
     assert result["sanitation_contract_count"] == 1
+    assert result["invoice_notifier"] is None
+
+
+async def test_diagnostics_includes_invoice_notifier_state():
+    from datetime import time
+
+    entry = ConfigEntry(data={"plant_id": "p"})
+    coordinator = Mock()
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True)
+    coordinator.invoice_notifier = Mock(
+        announced_count=3, reminded_count=1, reminder_time=time(18, 0), pending_reminder_invoice_id=42
+    )
+    entry.runtime_data = coordinator
+
+    result = await async_get_config_entry_diagnostics(hass=None, entry=entry)
+
+    assert result["invoice_notifier"] == {
+        "announced_count": 3,
+        "reminded_count": 1,
+        "reminder_time": "18:00:00",
+        "has_pending_reminder": True,
+    }

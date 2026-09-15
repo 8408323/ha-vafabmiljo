@@ -21,12 +21,18 @@ input_boolean:
   notify_person_a_new_invoice:
     name: "Person A: new invoice"
     icon: mdi:file-document-outline
+  notify_person_a_invoice_reminder:
+    name: "Person A: invoice due reminder"
+    icon: mdi:calendar-clock-outline
   notify_person_b_pickup_reminder:
     name: "Person B: waste pickup reminder"
     icon: mdi:bell-outline
   notify_person_b_new_invoice:
     name: "Person B: new invoice"
     icon: mdi:file-document-outline
+  notify_person_b_invoice_reminder:
+    name: "Person B: invoice due reminder"
+    icon: mdi:calendar-clock-outline
 
 automation:
   # A phone notification independent of (and possibly at a different time
@@ -78,15 +84,37 @@ automation:
               title: "Waste collection tomorrow"
               message: "Remember to put the bins out tonight."
 
-  # Fires when VafabMiljö issues a new invoice, rather than only ever
-  # checking on your own schedule. `invoice_count` only goes up when a new
-  # invoice actually appears - the invoice amount alone isn't a safe trigger
-  # since two invoices can coincidentally have the same amount.
+  # Fires when VafabMiljö issues a new invoice. Triggered by the integration's
+  # own `vafabmiljo_new_invoice` event, which it fires exactly once per invoice
+  # (the set of announced invoice ids is persisted, so restarts, reloads and
+  # failed polls can't re-announce an old one). Don't use a state trigger on
+  # the Latest invoice sensor's attributes for this: that re-fires every time
+  # the entity comes back from unavailable, which is what caused repeated
+  # "new invoice" pings for the same invoice.
+  #
+  # Event data: invoice_id, amount, invoice_date, due_date (YYYY-MM-DD),
+  # days_until_due, payment_status, ocr_number, address, city, entry_id.
+  #
+  # Events are fired for every configured address/entry. With more than one
+  # property in HA, filter on `event_data` (address + city, or entry_id) so
+  # each automation only reacts to its own property - drop the event_data
+  # block entirely if you only have one.
+  # `mode: queued`: several events can arrive back-to-back (a burst of new
+  # invoices, or catch-up reminders after downtime); the default `single`
+  # mode would drop the later ones while the first notification is running.
+  # `max` is spelled out because the default queue bound is 10, which would
+  # silently discard an eleventh event in the same burst. Queued mode always
+  # has a finite bound, so pick one above any burst you expect: with 25, a
+  # catch-up of more than 25 invoices at once would drop the surplus runs.
   - alias: "VafabMiljö - notify about new invoice"
+    mode: queued
+    max: 25
     trigger:
-      - platform: state
-        entity_id: sensor.exempelgatan_1_exempelstad_latest_invoice
-        attribute: invoice_count
+      - platform: event
+        event_type: vafabmiljo_new_invoice
+        event_data:
+          address: "Exempelgatan 1"
+          city: "Exempelstad"
     action:
       - if:
           - condition: state
@@ -96,9 +124,7 @@ automation:
           - service: notify.mobile_app_person_a_phone
             data:
               title: "New invoice from VafabMiljö"
-              message: >-
-                SEK {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].amount }}
-                - due {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].due_date.split('T')[0] }}
+              message: "SEK {{ trigger.event.data.amount }} - due {{ trigger.event.data.due_date }}"
       - if:
           - condition: state
             entity_id: input_boolean.notify_person_b_new_invoice
@@ -107,9 +133,40 @@ automation:
           - service: notify.mobile_app_person_b_phone
             data:
               title: "New invoice from VafabMiljö"
-              message: >-
-                SEK {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].amount }}
-                - due {{ state_attr('sensor.exempelgatan_1_exempelstad_latest_invoice', 'invoices')[0].due_date.split('T')[0] }}
+              message: "SEK {{ trigger.event.data.amount }} - due {{ trigger.event.data.due_date }}"
+
+  # The day before an unpaid invoice is due, at the time set on the
+  # "Invoice reminder time" entity (default 18:00), the integration fires
+  # `vafabmiljo_invoice_due_reminder` - once per invoice, same persistence
+  # as above. Invoices the backend already marks as paid never get one.
+  - alias: "VafabMiljö - remind about invoice due tomorrow"
+    mode: queued
+    max: 25
+    trigger:
+      - platform: event
+        event_type: vafabmiljo_invoice_due_reminder
+        event_data:
+          address: "Exempelgatan 1"
+          city: "Exempelstad"
+    action:
+      - if:
+          - condition: state
+            entity_id: input_boolean.notify_person_a_invoice_reminder
+            state: "on"
+        then:
+          - service: notify.mobile_app_person_a_phone
+            data:
+              title: "VafabMiljö invoice due tomorrow"
+              message: "SEK {{ trigger.event.data.amount }}, OCR {{ trigger.event.data.ocr_number }} - due {{ trigger.event.data.due_date }}"
+      - if:
+          - condition: state
+            entity_id: input_boolean.notify_person_b_invoice_reminder
+            state: "on"
+        then:
+          - service: notify.mobile_app_person_b_phone
+            data:
+              title: "VafabMiljö invoice due tomorrow"
+              message: "SEK {{ trigger.event.data.amount }}, OCR {{ trigger.event.data.ocr_number }} - due {{ trigger.event.data.due_date }}"
 
   # A different light color per bin type - one automation per type, each
   # gated on that type's own "tomorrow" binary sensor. All three can fire
