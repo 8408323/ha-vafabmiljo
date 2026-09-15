@@ -263,6 +263,58 @@ async def test_setting_reminder_time_persists_and_reschedules():
     assert fresh.reminder_time == time(7, 30)
 
 
+async def test_first_check_waits_for_ha_start_on_cold_boot():
+    import asyncio
+
+    hass = HomeAssistant()
+    hass.is_running = False
+    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    await notifier.async_setup()
+
+    # Nothing seeded, no timer yet: automations may not be listening.
+    assert notifier.announced_count == 0
+    assert hass.scheduled_timers == []
+    assert len(hass.started_callbacks) == 1
+
+    hass.is_running = True
+    hass.started_callbacks[0](hass)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert notifier.announced_count == 1
+    assert len(hass.scheduled_timers) == 1
+
+
+async def test_unload_before_ha_start_cancels_the_start_hook():
+    hass = HomeAssistant()
+    hass.is_running = False
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1)]))
+    await notifier.async_setup()
+    notifier.async_unload()
+    assert hass.started_callbacks == []
+
+
+async def test_unload_cancels_in_flight_checks_and_blocks_late_scheduling():
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(2), _inv(1)]})
+    coordinator.listeners[0]()  # spawns a check task that has not run yet
+    assert len(notifier._tasks) == 1
+    notifier.async_unload()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert notifier._tasks == set()
+    assert _events(hass, EVENT_NEW_INVOICE) == []  # cancelled before it could announce
+    assert hass.scheduled_timers == []
+
+    # A stale direct call after unload must not schedule anything either.
+    await notifier._async_check()
+    await notifier._async_schedule_reminder()
+    assert hass.scheduled_timers == []
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])

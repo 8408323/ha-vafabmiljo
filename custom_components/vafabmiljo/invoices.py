@@ -18,6 +18,7 @@ rather than tied to the 30-minute poll cadence.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -25,6 +26,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_point_in_time
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -75,6 +77,12 @@ class VafabMiljoInvoiceNotifier:
         # invoice snapshot (see _async_check). Persisted store => already seeded.
         self._seeded = False
         self._last_invoices: list[dict[str, Any]] = []
+        # In-flight _async_check tasks spawned from the coordinator listener,
+        # so an unload/reload can cancel them instead of letting a stale
+        # instance schedule timers (and double-fire) next to its replacement.
+        self._tasks: set[asyncio.Task] = set()
+        self._unloaded = False
+        self._unsub_started = None
         self.pending_reminder_invoice_id: int | None = None
 
     # -- lifecycle -------------------------------------------------------------
@@ -88,14 +96,33 @@ class VafabMiljoInvoiceNotifier:
             if stored.get("reminder_time"):
                 self._reminder_time = time.fromisoformat(stored["reminder_time"])
         self._unsub_listener = self._coordinator.async_add_listener(self._handle_coordinator_update)
-        await self._async_check()
+        # During a cold HA start this entry may be set up before the automation
+        # integration has its event listeners in place; an event fired now would
+        # be persisted as delivered yet reach nobody. Wait for HA to be fully
+        # started before the first check (a later reload runs it immediately).
+        if self._hass.is_running:
+            await self._async_check()
+        else:
+            self._unsub_started = async_at_started(self._hass, self._handle_started)
+
+    @callback
+    def _handle_started(self, _hass: HomeAssistant) -> None:
+        self._unsub_started = None
+        self._spawn_check()
 
     @callback
     def async_unload(self) -> None:
+        self._unloaded = True
         self._cancel_timer()
+        if self._unsub_started is not None:
+            self._unsub_started()
+            self._unsub_started = None
         if self._unsub_listener is not None:
             self._unsub_listener()
             self._unsub_listener = None
+        for task in list(self._tasks):
+            task.cancel()
+        self._tasks.clear()
 
     @property
     def reminder_time(self) -> time:
@@ -118,7 +145,13 @@ class VafabMiljoInvoiceNotifier:
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        self._hass.async_create_task(self._async_check())
+        self._spawn_check()
+
+    @callback
+    def _spawn_check(self) -> None:
+        task = self._hass.async_create_task(self._async_check())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     def _has_snapshot(self) -> bool:
         """Whether the last refresh actually got an invoice list (a failed poll leaves invoices=None)."""
@@ -151,7 +184,7 @@ class VafabMiljoInvoiceNotifier:
         )
 
     async def _async_check(self) -> None:
-        if not self._has_snapshot():
+        if self._unloaded or not self._has_snapshot():
             # A failed /services/invoices poll (or no data yet): nothing to
             # compare against. Leave any already-scheduled reminder timer in
             # place rather than cancelling it and hoping the next poll lands
@@ -220,6 +253,8 @@ class VafabMiljoInvoiceNotifier:
 
     async def _async_schedule_reminder(self) -> None:
         self._cancel_timer()
+        if self._unloaded:
+            return
         now = dt_util.now()
         candidate = self._next_reminder_candidate(now.date())
         if candidate is None:

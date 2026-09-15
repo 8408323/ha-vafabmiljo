@@ -92,6 +92,9 @@ def _install_stub_homeassistant() -> None:
             self.data: dict[str, Any] = {}
             self.services = _ServiceRegistry()
             self.bus = _EventBus()
+            self.is_running = True
+            # callbacks registered via helpers.start.async_at_started while not running
+            self.started_callbacks: list[Any] = []
             self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts))
             self.scheduled_jobs: list[Any] = []
             # (action, when) pairs registered via async_track_point_in_time
@@ -328,6 +331,23 @@ def _install_stub_homeassistant() -> None:
     event_mod.async_call_later = async_call_later
     event_mod.async_track_point_in_time = async_track_point_in_time
     sys.modules["homeassistant.helpers.event"] = event_mod
+
+    start_mod = types.ModuleType("homeassistant.helpers.start")
+
+    def async_at_started(hass, at_start_cb):
+        if hass.is_running:
+            at_start_cb(hass)
+            return lambda: None
+        hass.started_callbacks.append(at_start_cb)
+
+        def _unsub() -> None:
+            if at_start_cb in hass.started_callbacks:
+                hass.started_callbacks.remove(at_start_cb)
+
+        return _unsub
+
+    start_mod.async_at_started = async_at_started
+    sys.modules["homeassistant.helpers.start"] = start_mod
 
     storage_mod = types.ModuleType("homeassistant.helpers.storage")
 
