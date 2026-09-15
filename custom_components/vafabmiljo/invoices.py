@@ -314,8 +314,9 @@ class VafabMiljoInvoiceNotifier:
             self._reminder_time = value
             saved = False
             try:
-                await self._async_save()
-                saved = True
+                # False means the write was refused (entry removal deleted the
+                # store), which is as unpersisted as an exception.
+                saved = await self._async_save()
             finally:
                 if not saved:
                     # Keep value and timer consistent: the entity would
@@ -326,6 +327,8 @@ class VafabMiljoInvoiceNotifier:
                     self._reminder_time = previous
                     with contextlib.suppress(Exception):
                         await self._async_schedule_reminder()
+            if not saved:
+                return
             await self._async_schedule_reminder()
             await self._async_flush_pending()
 

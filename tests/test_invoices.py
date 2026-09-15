@@ -1245,6 +1245,21 @@ async def test_no_catch_up_reminder_when_the_save_was_refused():
     assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
 
 
+async def test_reminder_time_change_refused_after_removal_is_rolled_back():
+    hass = HomeAssistant()
+    notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    assert notifier.pending_reminder_invoice_id == 1
+
+    # Removal deletes the store; the notifier itself has not been unloaded yet,
+    # so a queued entity call still reaches the save and is refused there.
+    await async_remove_invoice_store(hass, _entry())
+    await notifier.async_set_reminder_time(time(7, 0))
+
+    assert notifier.reminder_time == time(18, 0)  # never persisted, so not adopted
+    assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
+    assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
 async def test_untrusted_store_contributes_no_markers():
     hass = HomeAssistant()
     hass.data["_stores"] = {
