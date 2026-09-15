@@ -27,6 +27,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = VafabMiljoCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    # Before the notifier: its first check can fire an invoice event straight
+    # away, and an automation reacting to that event may call this service.
+    # Registration is idempotent across entries.
+    async_setup_services(hass)
     if coordinator.data.authenticated:
         # Event-based new-invoice / due-reminder delivery (see invoices.py).
         # Only for BankID-connected entries: an anonymous one never sees an
@@ -41,7 +45,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await coordinator.invoice_notifier.async_setup()
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
-        async_setup_services(hass)
     except BaseException:
         # HA only runs on_unload callbacks for its own ConfigEntry* exceptions;
         # on any other failure the notifier (listener + timer) would leak and a

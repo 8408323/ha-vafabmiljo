@@ -142,3 +142,29 @@ async def test_remove_entry_deletes_the_invoice_store():
     await async_remove_entry(hass, entry)
 
     assert hass.data["_stores"] == {}
+
+
+async def test_download_service_is_registered_before_the_notifier_can_fire(monkeypatch):
+    """An event fired by the notifier's first check may be acted on immediately."""
+    from vafabmiljo.const import DOMAIN
+    from vafabmiljo.coordinator import VafabMiljoData
+    from vafabmiljo.invoices import VafabMiljoInvoiceNotifier
+
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": []})
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
+
+    hass = _hass()
+    seen: dict[str, bool] = {}
+    original_setup = VafabMiljoInvoiceNotifier.async_setup
+
+    async def _record(self):
+        seen["service_registered"] = hass.services.has_service(DOMAIN, "download_invoice")
+        await original_setup(self)
+
+    monkeypatch.setattr(VafabMiljoInvoiceNotifier, "async_setup", _record)
+
+    await async_setup_entry(hass, _entry())
+
+    assert seen["service_registered"] is True
