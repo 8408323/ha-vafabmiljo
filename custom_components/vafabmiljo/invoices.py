@@ -18,6 +18,7 @@ rather than tied to the 30-minute poll cadence.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -32,6 +33,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_ADDRESS,
     CONF_CITY,
+    CONF_PLANT_ID,
     DEFAULT_INVOICE_REMINDER_TIME,
     DOMAIN,
     EVENT_INVOICE_DUE_REMINDER,
@@ -48,9 +50,22 @@ def _store_key(entry: ConfigEntry) -> str:
     return f"{DOMAIN}.{entry.entry_id}.invoices"
 
 
+def _store_lock(hass: HomeAssistant, key: str) -> asyncio.Lock:
+    """One lock per store, shared across notifier instances of the same entry.
+
+    A reload replaces the notifier while the old one may still be inside its
+    post-event save; the replacement must not read the store (and re-announce)
+    before that save has landed, and removal must not race it either.
+    """
+    locks: dict[str, asyncio.Lock] = hass.data.setdefault(f"{DOMAIN}_invoice_store_locks", {})
+    return locks.setdefault(key, asyncio.Lock())
+
+
 async def async_remove_invoice_store(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete the per-entry persisted state when the entry itself is removed."""
-    await Store(hass, INVOICE_STORAGE_VERSION, _store_key(entry)).async_remove()
+    key = _store_key(entry)
+    async with _store_lock(hass, key):
+        await Store(hass, INVOICE_STORAGE_VERSION, key).async_remove()
 
 
 def _parse_date(value: Any) -> date | None:
@@ -89,6 +104,7 @@ class VafabMiljoInvoiceNotifier:
         self._entry = entry
         self._coordinator = coordinator
         self._store: Store = Store(hass, INVOICE_STORAGE_VERSION, _store_key(entry))
+        self._lock = _store_lock(hass, _store_key(entry))
         self._announced: set[int] = set()
         self._reminded: set[int] = set()
         self._reminder_time = time.fromisoformat(DEFAULT_INVOICE_REMINDER_TIME)
@@ -111,7 +127,14 @@ class VafabMiljoInvoiceNotifier:
     # -- lifecycle -------------------------------------------------------------
 
     async def async_setup(self) -> None:
-        stored = await self._store.async_load()
+        async with self._lock:
+            stored = await self._store.async_load()
+        if stored is not None and stored.get("plant_id") not in (None, self._entry.data.get(CONF_PLANT_ID)):
+            # The entry was reconfigured to another address (same entry_id):
+            # the old property's announced/reminded/cached state must not
+            # carry over. Keep only the user's reminder time.
+            _LOGGER.debug("Bound property changed; resetting persisted invoice state")
+            stored = {"reminder_time": stored.get("reminder_time")}
         if stored is not None:
             # An explicit flag, not the store's mere existence: changing the
             # reminder time also writes the store, possibly before the first
@@ -173,8 +196,15 @@ class VafabMiljoInvoiceNotifier:
         return len(self._reminded)
 
     async def async_set_reminder_time(self, value: time) -> None:
+        previous = self._reminder_time
         self._reminder_time = value
-        await self._async_save()
+        try:
+            await self._async_save()
+        except Exception:
+            # Keep value and timer consistent: the entity would otherwise show
+            # the new time while the armed timer still fires at the old one.
+            self._reminder_time = previous
+            raise
         await self._async_schedule_reminder()
 
     # -- internals -------------------------------------------------------------
@@ -203,16 +233,21 @@ class VafabMiljoInvoiceNotifier:
         return self._last_invoices
 
     async def _async_save(self) -> None:
-        self._stored_invoices = list(self._last_invoices)
-        await self._store.async_save(
-            {
-                "seeded": self._seeded,
-                "announced": sorted(self._announced),
-                "reminded": sorted(self._reminded),
-                "reminder_time": self._reminder_time.isoformat(),
-                "invoices": self._last_invoices,
-            }
-        )
+        snapshot = list(self._last_invoices)
+        async with self._lock:
+            await self._store.async_save(
+                {
+                    "plant_id": self._entry.data.get(CONF_PLANT_ID),
+                    "seeded": self._seeded,
+                    "announced": sorted(self._announced),
+                    "reminded": sorted(self._reminded),
+                    "reminder_time": self._reminder_time.isoformat(),
+                    "invoices": snapshot,
+                }
+            )
+        # Only after the write landed - a failed save must look unsaved so the
+        # next check retries it.
+        self._stored_invoices = snapshot
 
     async def _async_check(self) -> None:
         if self._unloaded:

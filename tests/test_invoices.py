@@ -452,6 +452,79 @@ async def test_store_with_string_or_junk_ids_is_normalised_on_load():
     assert notifier.reminded_count == 0
 
 
+async def test_failed_save_is_retried_on_the_next_check():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(8)]})
+    original = notifier._store.async_save
+    calls = {"n": 0}
+
+    async def flaky(data):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("disk full")
+        await original(data)
+
+    notifier._store.async_save = flaky
+    with pytest.raises(OSError):
+        await notifier._async_check()
+    assert (
+        "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+        or hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == []
+    )
+    # Same data again: the event is not re-fired (already in memory) but the save is retried.
+    await notifier._async_check()
+    assert calls["n"] == 2
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [8]
+    assert [e["invoice_id"] for e in _events(hass, EVENT_NEW_INVOICE)] == [8]
+
+
+async def test_failed_reminder_time_save_rolls_back():
+    hass = HomeAssistant()
+    notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+
+    async def boom(data):
+        raise OSError("disk full")
+
+    notifier._store.async_save = boom
+    with pytest.raises(OSError):
+        await notifier.async_set_reminder_time(time(7, 0))
+    assert notifier.reminder_time == time(18, 0)
+    assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
+
+
+async def test_reconfigured_property_resets_persisted_state_but_keeps_reminder_time():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, status="Helt betald")])
+    await notifier.async_set_reminder_time(time(7, 0))
+    notifier.async_unload()
+    # Same entry_id, different plant_id (reconfigure flow): old state must not carry over.
+    entry = ConfigEntry(data={"address": "Nygatan 2", "city": "Teststad", "plant_id": "p2"})
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(9)]})
+    fresh = VafabMiljoInvoiceNotifier(hass, entry, coordinator)
+    await fresh.async_setup()
+    assert fresh.reminder_time == time(7, 0)
+    assert _events(hass, EVENT_NEW_INVOICE) == []  # re-baselined on the new property's history
+    assert fresh.announced_count == 1
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["plant_id"] == "p2"
+
+
+async def test_store_lock_is_shared_per_entry_and_remove_waits_for_it():
+    import asyncio
+
+    hass = HomeAssistant()
+    a = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([]))
+    b = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([]))
+    assert a._lock is b._lock
+    await a.async_setup()
+    async with a._lock:
+        remove = asyncio.ensure_future(async_remove_invoice_store(hass, _entry()))
+        await asyncio.sleep(0)
+        assert not remove.done()  # blocked behind the in-flight holder
+    await remove
+    assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])
