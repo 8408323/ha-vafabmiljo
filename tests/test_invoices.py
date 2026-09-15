@@ -60,6 +60,15 @@ async def _setup(hass: HomeAssistant, invoices: list[dict] | None):
     return notifier, coordinator
 
 
+def _ignore_defunct(monkeypatch, notifier):
+    """Simulate entry removal landing after the defunct guard was evaluated.
+
+    The guard short-circuits the common case; the per-save checks exist for the
+    race where removal lands while work is already under way.
+    """
+    monkeypatch.setattr(type(notifier), "_defunct", property(lambda self: False))
+
+
 def _events(hass: HomeAssistant, event_type: str) -> list[dict]:
     return [data for etype, data in hass.bus.fired if etype == event_type]
 
@@ -1211,52 +1220,67 @@ async def test_due_date_moved_during_the_write_reschedules_instead_of_firing():
     assert hass.scheduled_timers[0][1] == datetime(2026, 10, 4, 18, 0, tzinfo=timezone.utc)
 
 
-async def test_no_event_is_fired_when_the_save_was_refused():
-    import asyncio
-
+async def test_no_event_is_fired_when_the_save_was_refused(monkeypatch):
     hass = HomeAssistant()
     notifier, coordinator = await _setup(hass, [])
     coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(4)]})
 
-    # Entry removal deletes the store; a check already past its unload checks
-    # then finds its write refused.
     await async_remove_invoice_store(hass, _entry())
+    _ignore_defunct(monkeypatch, notifier)
     await notifier._async_check()
-    await asyncio.sleep(0)
 
-    # A removed entry announces nothing, and no marker is left claiming it did.
+    # A removed entry announces nothing, and no marker claims it did.
     assert _events(hass, EVENT_NEW_INVOICE) == []
     assert 4 not in notifier._announced
     assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
 
 
-async def test_no_catch_up_reminder_when_the_save_was_refused():
-    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)  # catch-up path
+async def test_no_catch_up_reminder_when_the_save_was_refused(monkeypatch):
     hass = HomeAssistant()
-    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
-    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    # Set up well before the reminder moment, so setup only arms a timer.
+    notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
 
-    # The store is gone before the notifier ever writes to it.
+    # Now move past it, so the next scheduling pass takes the catch-up branch.
+    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)
     await async_remove_invoice_store(hass, _entry())
-    await notifier.async_setup()
+    _ignore_defunct(monkeypatch, notifier)
+    await notifier._async_schedule_reminder()
 
     assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
     assert notifier.reminded_count == 0
     assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
 
 
-async def test_reminder_time_change_refused_after_removal_is_rolled_back():
+async def test_reminder_time_change_refused_after_removal_is_rolled_back(monkeypatch):
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
     assert notifier.pending_reminder_invoice_id == 1
 
-    # Removal deletes the store; the notifier itself has not been unloaded yet,
-    # so a queued entity call still reaches the save and is refused there.
     await async_remove_invoice_store(hass, _entry())
+    _ignore_defunct(monkeypatch, notifier)
     await notifier.async_set_reminder_time(time(7, 0))
 
     assert notifier.reminder_time == time(18, 0)  # never persisted, so not adopted
     assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
+    assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
+async def test_notifier_stops_working_once_its_store_is_removed():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    assert hass.scheduled_timers
+
+    await async_remove_invoice_store(hass, _entry())
+
+    # Not unloaded, but defunct: no check, no schedule, no flush may write.
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(7)]})
+    await notifier._async_check()
+    await notifier._async_schedule_reminder()
+    await notifier._async_flush_pending()
+
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+    assert 7 not in notifier._announced
     assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
 
 

@@ -266,6 +266,16 @@ class VafabMiljoInvoiceNotifier:
             await self._async_save()
 
     @property
+    def _defunct(self) -> bool:
+        """Unloaded, or its store deleted by entry removal - stop doing work either way.
+
+        The individual save-result checks stay as well: removal can also land
+        while a save is already waiting on the store lock, which this flag
+        cannot see in advance.
+        """
+        return self._unloaded or self._store.key in _removed_store_keys(self._hass)
+
+    @property
     def _ha_running(self) -> bool:
         return self._hass.state is CoreState.running
 
@@ -306,9 +316,10 @@ class VafabMiljoInvoiceNotifier:
 
     async def async_set_reminder_time(self, value: time) -> None:
         async with self._work_lock:
-            if self._unloaded:
-                # A queued entity call that got the lock after teardown; saving
-                # here could recreate a store that entry removal just deleted.
+            if self._defunct:
+                # A queued entity call that got the lock after teardown, or
+                # after entry removal deleted the store: saving here could
+                # recreate it.
                 return
             previous = self._reminder_time
             self._reminder_time = value
@@ -397,13 +408,13 @@ class VafabMiljoInvoiceNotifier:
         which a restart with a failing poll would otherwise load and schedule
         from.
         """
-        if self._unloaded:
+        if self._defunct:
             return
         if self._dirty or self._last_invoices != self._stored_invoices:
             await self._async_save()
 
     async def _async_check_locked(self) -> None:
-        if self._unloaded:
+        if self._defunct:
             return
         if not self._has_snapshot():
             # A failed /services/invoices poll (or no data yet): nothing to
@@ -524,7 +535,7 @@ class VafabMiljoInvoiceNotifier:
 
     async def _async_schedule_reminder(self) -> None:
         self._cancel_timer()
-        if self._unloaded:
+        if self._defunct:
             return
         now = dt_util.now()
         candidate = self._next_reminder_candidate(now.date())
