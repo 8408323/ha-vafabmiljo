@@ -208,7 +208,10 @@ class VafabMiljoInvoiceNotifier:
             # An explicit flag, not the store's mere existence: changing the
             # reminder time also writes the store, possibly before the first
             # valid invoice snapshot ever arrived.
-            self._seeded = bool(stored.get("seeded", False))
+            # Only a real boolean True counts: bool("false") and bool([0]) are
+            # both truthy, and a corrupt flag would skip the first-run baseline
+            # and announce the whole invoice history as new.
+            self._seeded = stored.get("seeded") is True
             # Normalise like the decoder does, so a store written with string
             # ids can never mismatch the int ids of a fresh snapshot.
             self._announced = _load_ids(stored.get("announced"))

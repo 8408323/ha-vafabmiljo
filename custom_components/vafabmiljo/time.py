@@ -127,5 +127,10 @@ class VafabMiljoInvoiceReminderTimeEntity(TimeEntity):
         return self._notifier.reminder_time
 
     async def async_set_value(self, value: time) -> None:
-        await self._notifier.async_set_reminder_time(value)
-        self.async_write_ha_state()
+        try:
+            await self._notifier.async_set_reminder_time(value)
+        finally:
+            # The notifier can persist the new time and still raise while
+            # rescheduling; publish whatever it settled on either way, so the
+            # entity never disagrees with storage.
+            self.async_write_ha_state()

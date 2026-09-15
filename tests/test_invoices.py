@@ -851,6 +851,27 @@ async def test_cancelled_reminder_time_save_restores_value_and_schedule():
     assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("flag", ["false", "true", [0], 1, None])
+async def test_only_a_real_true_counts_as_seeded(flag):
+    hass = HomeAssistant()
+    hass.data["_stores"] = {
+        "vafabmiljo.test_entry.invoices": {
+            "seeded": flag,
+            "plant_id": "p1",
+            "announced": [],
+            "reminded": [],
+            "reminder_time": "18:00:00",
+            "invoices": [],
+        }
+    }
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1), _inv(2)]))
+    await notifier.async_setup()
+    # A corrupt flag must fall back to baselining, never announce the history.
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+    assert notifier.announced_count == 2
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["seeded"] is True
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])

@@ -123,3 +123,19 @@ async def test_notify_time_restores_last_state_on_add_to_hass():
     await entity.async_added_to_hass()
 
     assert entity.native_value == time(6, 30)
+
+
+async def test_invoice_reminder_time_publishes_state_even_if_scheduling_raises():
+    notifier = Mock(reminder_time=time(18, 0))
+    notifier.async_set_reminder_time = AsyncMock(side_effect=OSError("reschedule failed"))
+    entity = VafabMiljoInvoiceReminderTimeEntity(_entry(), notifier)
+    entity.async_write_ha_state = Mock()
+
+    import pytest
+
+    with pytest.raises(OSError):
+        await entity.async_set_value(time(9, 15))
+
+    # Whatever the notifier settled on must reach the entity, or the UI would
+    # keep showing a value that storage no longer holds.
+    entity.async_write_ha_state.assert_called_once()
