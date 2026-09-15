@@ -732,6 +732,48 @@ async def test_failed_reminder_time_save_restores_the_previous_schedule():
     assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
 
 
+async def test_cancelled_save_leaves_the_invoice_retryable():
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(8)]})
+
+    async def cancelled(data):
+        raise asyncio.CancelledError
+
+    notifier._store.async_save = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await notifier._async_check()
+    # CancelledError is not an Exception: the marker must still be rolled back,
+    # or the invoice would be suppressed forever without ever being announced.
+    assert 8 not in notifier._announced
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+
+
+async def test_cancelled_reminder_save_leaves_the_reminder_retryable():
+    import asyncio
+
+    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)  # catch-up path
+    hass = HomeAssistant()
+    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    original = notifier._store.async_save
+    calls = {"n": 0}
+
+    async def cancelled(data):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise asyncio.CancelledError
+        await original(data)
+
+    notifier._store.async_save = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await notifier.async_setup()
+    assert 1 not in notifier._reminded
+    assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])

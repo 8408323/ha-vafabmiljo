@@ -187,3 +187,17 @@ def test_available_orders_flattens_across_contracts():
     )
     assert data.current_property_id == 1
     assert {o["id"] for o in data.available_orders} == {1, 2}
+
+
+def test_as_invoice_id_rejects_malformed_values_without_raising():
+    from vafabmiljo.coordinator import _as_invoice_id
+
+    assert _as_invoice_id(5) == 5
+    assert _as_invoice_id(" 5 ") == 5
+    # str.isdigit() is true for these but int() refuses the first one.
+    assert _as_invoice_id("\u00b2") is None
+    assert _as_invoice_id("\uff15") == 5
+    assert _as_invoice_id(True) is None
+    assert _as_invoice_id(None) is None
+    assert _as_invoice_id([]) is None
+    assert _as_invoice_id("12a") is None

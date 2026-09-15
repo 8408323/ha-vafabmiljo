@@ -20,13 +20,21 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _as_invoice_id(value: Any) -> int | None:
-    """Backend invoice ids are ints; accept numeric strings, reject everything else (incl. bools)."""
+    """Backend invoice ids are ints; accept numeric strings, reject everything else (incl. bools).
+
+    str.isdigit() is true for characters int() refuses, such as the superscript
+    "\u00b2", so the conversion itself is the test - a malformed stored id must be
+    rejected here, never raise (this also decodes persisted marker ids).
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
     return None
 
 

@@ -353,17 +353,22 @@ class VafabMiljoInvoiceNotifier:
             pending = {inv["id"] for inv in new}
             self._announced |= pending
             self._mark_dirty()
+            delivered = False
             try:
                 await self._async_save()
-            except Exception:
-                # Not delivered and not recorded: let the next check try again.
-                self._announced -= pending
-                raise
-            # The backend lists newest first; announce oldest-first so a burst
-            # of several new invoices arrives in chronological order.
-            for inv in reversed(new):
-                self._hass.bus.async_fire(EVENT_NEW_INVOICE, self._event_data(inv))
-                _LOGGER.debug("Announced new invoice %s", inv["id"])
+                # The backend lists newest first; announce oldest-first so a
+                # burst of several new invoices arrives in chronological order.
+                for inv in reversed(new):
+                    self._hass.bus.async_fire(EVENT_NEW_INVOICE, self._event_data(inv))
+                    _LOGGER.debug("Announced new invoice %s", inv["id"])
+                delivered = True
+            finally:
+                if not delivered:
+                    # Nothing went out, so nothing may stay marked - including
+                    # when the save was interrupted by CancelledError during a
+                    # reload, which an `except Exception` would let through and
+                    # leave the invoice permanently suppressed.
+                    self._announced -= pending
         elif self._dirty or self._last_invoices != self._stored_invoices:
             await self._async_save()
         await self._async_schedule_reminder()
@@ -427,13 +432,15 @@ class VafabMiljoInvoiceNotifier:
             # rather than silently skipping it, then look for the next one.
             self._reminded.add(inv["id"])
             self._mark_dirty()
+            delivered = False
             try:
                 await self._async_save()
-            except Exception:
-                self._reminded.discard(inv["id"])
-                raise
-            self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(inv))
-            _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
+                self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(inv))
+                _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
+                delivered = True
+            finally:
+                if not delivered:
+                    self._reminded.discard(inv["id"])
             await self._async_schedule_reminder()
             return
         self._timer_token += 1
