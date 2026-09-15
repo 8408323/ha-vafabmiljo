@@ -19,6 +19,16 @@ from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
+def _as_invoice_id(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 @dataclass
 class VafabMiljoData:
     """Everything the coordinator fetched on the last successful refresh."""
@@ -63,11 +73,18 @@ class VafabMiljoData:
         return self._decode_invoice_items() if self.has_invoice_snapshot else []
 
     def _decode_invoice_items(self) -> list[dict[str, Any]]:
+        """Rows whose item has an integer id (numeric strings normalised), first occurrence per id."""
         out: list[dict[str, Any]] = []
+        seen: set[int] = set()
         for inv in self.invoices["data"]:
             item = inv.get("item") if isinstance(inv, dict) else None
-            if isinstance(item, dict) and item.get("id") is not None:
-                out.append(item)
+            if not isinstance(item, dict):
+                continue
+            invoice_id = _as_invoice_id(item.get("id"))
+            if invoice_id is None or invoice_id in seen:
+                continue
+            seen.add(invoice_id)
+            out.append({**item, "id": invoice_id})
         return out
 
     @property

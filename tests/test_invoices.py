@@ -391,6 +391,54 @@ async def test_all_junk_rows_do_not_count_as_a_snapshot():
     assert n2.announced_count == 0
 
 
+async def test_duplicate_ids_in_one_response_announce_once_and_ids_are_normalised():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [])
+    coordinator.data = VafabMiljoData(
+        pickups=[],
+        authenticated=True,
+        invoices={
+            "data": [
+                _inv(4),
+                _inv(4),
+                {"item": {"id": "5", "amount": 1}},
+                {"item": {"id": [], "amount": 2}},
+                {"item": {"id": True}},
+            ]
+        },
+    )
+    await notifier._async_check()
+    assert [e["invoice_id"] for e in _events(hass, EVENT_NEW_INVOICE)] == [5, 4]
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [4, 5]
+
+
+async def test_reminder_recovers_after_restart_with_failed_first_poll():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    stored = hass.data["_stores"]["vafabmiljo.test_entry.invoices"]
+    assert [i["id"] for i in stored["invoices"]] == [1]
+    notifier.async_unload()
+
+    # Restart: the first poll fails, but the persisted list still schedules the reminder.
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=None)
+    fresh = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    await fresh.async_setup()
+    assert fresh.pending_reminder_invoice_id == 1
+    assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
+
+    # A second failed poll while the timer is armed leaves it alone.
+    await fresh._async_check()
+    assert len(hass.scheduled_timers) == 1
+
+    # Once a valid snapshot says it is paid, the next scheduling pass drops it.
+    coordinator.data = VafabMiljoData(
+        pickups=[], authenticated=True, invoices={"data": [_inv(1, status="Helt betald")]}
+    )
+    await fresh._async_check()
+    assert hass.scheduled_timers == []
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["invoices"][0]["paymentStatus"] == "Helt betald"
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])

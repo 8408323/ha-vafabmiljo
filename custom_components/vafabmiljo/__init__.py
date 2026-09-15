@@ -36,8 +36,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         notifier = VafabMiljoInvoiceNotifier(hass, entry, coordinator)
         coordinator.invoice_notifier = notifier
         entry.async_on_unload(notifier.async_unload)
-        await notifier.async_setup()
     try:
+        if coordinator.invoice_notifier is not None:
+            await coordinator.invoice_notifier.async_setup()
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
         async_setup_services(hass)

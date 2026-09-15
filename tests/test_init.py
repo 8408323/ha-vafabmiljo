@@ -108,6 +108,32 @@ async def test_setup_failure_after_notifier_tears_it_down(monkeypatch):
     assert coordinator._listeners == []  # notifier's listener was removed
 
 
+async def test_notifier_setup_failure_tears_it_down(monkeypatch):
+    from vafabmiljo.coordinator import VafabMiljoData
+    from vafabmiljo.invoices import VafabMiljoInvoiceNotifier
+
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": []})
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
+
+    async def _boom(self):
+        self._unsub_listener = self._coordinator.async_add_listener(self._handle_coordinator_update)
+        raise OSError("store write failed")
+
+    monkeypatch.setattr(VafabMiljoInvoiceNotifier, "async_setup", _boom)
+    hass = _hass()
+    entry = _entry()
+
+    import pytest
+
+    with pytest.raises(OSError):
+        await async_setup_entry(hass, entry)
+
+    assert entry.runtime_data.invoice_notifier is None
+    assert entry.runtime_data._listeners == []
+
+
 async def test_remove_entry_deletes_the_invoice_store():
     hass = _hass()
     hass.data["_stores"] = {"vafabmiljo.test_entry.invoices": {"announced": [1]}}

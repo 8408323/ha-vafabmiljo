@@ -63,6 +63,14 @@ def _parse_date(value: Any) -> date | None:
         return None
 
 
+_KEEP_FIELDS = ("id", "amount", "invoiceDate", "invoiceExpirationDate", "paymentStatus", "ocrNumber")
+
+
+def _slim(invoice: dict[str, Any]) -> dict[str, Any]:
+    """Only the fields this module uses - this list is persisted to storage."""
+    return {k: invoice.get(k) for k in _KEEP_FIELDS}
+
+
 def _is_paid(invoice: dict[str, Any]) -> bool:
     return str(invoice.get("paymentStatus") or "").strip().lower() in PAID_STATUSES
 
@@ -84,6 +92,7 @@ class VafabMiljoInvoiceNotifier:
         # invoice snapshot (see _async_check). Persisted store => already seeded.
         self._seeded = False
         self._last_invoices: list[dict[str, Any]] = []
+        self._stored_invoices: list[dict[str, Any]] = []  # what the store currently holds
         # Set on unload. In-flight checks are deliberately *not* cancelled: the
         # only suspension point in a check sits between firing an event and
         # persisting it, and cancelling there would forget a delivered event
@@ -104,6 +113,10 @@ class VafabMiljoInvoiceNotifier:
             self._seeded = bool(stored.get("seeded", False))
             self._announced = set(stored.get("announced", []))
             self._reminded = set(stored.get("reminded", []))
+            # Last decoded invoice list, so a reminder can still be scheduled
+            # (or caught up) after a restart whose first poll fails.
+            self._last_invoices = [inv for inv in stored.get("invoices", []) if isinstance(inv, dict)]
+            self._stored_invoices = list(self._last_invoices)
             if stored.get("reminder_time"):
                 self._reminder_time = time.fromisoformat(stored["reminder_time"])
         self._unsub_listener = self._coordinator.async_add_listener(self._handle_coordinator_update)
@@ -178,25 +191,32 @@ class VafabMiljoInvoiceNotifier:
         knows which invoice it was scheduled for.
         """
         if self._has_snapshot():
-            self._last_invoices = self._coordinator.data.invoice_items
+            self._last_invoices = [_slim(inv) for inv in self._coordinator.data.invoice_items]
         return self._last_invoices
 
     async def _async_save(self) -> None:
+        self._stored_invoices = list(self._last_invoices)
         await self._store.async_save(
             {
                 "seeded": self._seeded,
                 "announced": sorted(self._announced),
                 "reminded": sorted(self._reminded),
                 "reminder_time": self._reminder_time.isoformat(),
+                "invoices": self._last_invoices,
             }
         )
 
     async def _async_check(self) -> None:
-        if self._unloaded or not self._has_snapshot():
+        if self._unloaded:
+            return
+        if not self._has_snapshot():
             # A failed /services/invoices poll (or no data yet): nothing to
             # compare against. Leave any already-scheduled reminder timer in
             # place rather than cancelling it and hoping the next poll lands
-            # before the due date.
+            # before the due date - but if there is no timer at all (fresh
+            # restart), schedule from the persisted last-known list.
+            if self._unsub_timer is None and self._last_invoices:
+                await self._async_schedule_reminder()
             return
         if not self._seeded:
             # First run: everything already on the account is history, not
@@ -215,7 +235,7 @@ class VafabMiljoInvoiceNotifier:
             self._hass.bus.async_fire(EVENT_NEW_INVOICE, self._event_data(inv))
             self._announced.add(inv["id"])
             _LOGGER.debug("Announced new invoice %s", inv["id"])
-        if new:
+        if new or self._last_invoices != self._stored_invoices:
             await self._async_save()
         await self._async_schedule_reminder()
 

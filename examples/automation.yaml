@@ -21,12 +21,18 @@ input_boolean:
   notify_person_a_new_invoice:
     name: "Person A: new invoice"
     icon: mdi:file-document-outline
+  notify_person_a_invoice_reminder:
+    name: "Person A: invoice due reminder"
+    icon: mdi:calendar-clock-outline
   notify_person_b_pickup_reminder:
     name: "Person B: waste pickup reminder"
     icon: mdi:bell-outline
   notify_person_b_new_invoice:
     name: "Person B: new invoice"
     icon: mdi:file-document-outline
+  notify_person_b_invoice_reminder:
+    name: "Person B: invoice due reminder"
+    icon: mdi:calendar-clock-outline
 
 automation:
   # A phone notification independent of (and possibly at a different time
@@ -134,7 +140,7 @@ automation:
     action:
       - if:
           - condition: state
-            entity_id: input_boolean.notify_person_a_new_invoice
+            entity_id: input_boolean.notify_person_a_invoice_reminder
             state: "on"
         then:
           - service: notify.mobile_app_person_a_phone
@@ -143,7 +149,7 @@ automation:
               message: "SEK {{ trigger.event.data.amount }}, OCR {{ trigger.event.data.ocr_number }} - due {{ trigger.event.data.due_date }}"
       - if:
           - condition: state
-            entity_id: input_boolean.notify_person_b_new_invoice
+            entity_id: input_boolean.notify_person_b_invoice_reminder
             state: "on"
         then:
           - service: notify.mobile_app_person_b_phone
