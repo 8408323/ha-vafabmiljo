@@ -66,6 +66,9 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         )
         self.entry = entry
         self.client = client
+        # Set by __init__ after the first refresh; None until then (and in tests
+        # that build a coordinator directly).
+        self.invoice_notifier: Any = None
 
     async def _async_update_data(self) -> VafabMiljoData:
         try:

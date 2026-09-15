@@ -37,4 +37,17 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         "bin_types": bin_types,
         "invoice_count": len((data.invoices or {}).get("data", [])),
         "sanitation_contract_count": len((data.sanitation or {}).get("contracts", [])),
+        "invoice_notifier": _notifier_diagnostics(coordinator),
+    }
+
+
+def _notifier_diagnostics(coordinator: VafabMiljoCoordinator) -> dict[str, Any] | None:
+    notifier = getattr(coordinator, "invoice_notifier", None)
+    if notifier is None:
+        return None
+    return {
+        "announced_count": notifier.announced_count,
+        "reminded_count": notifier.reminded_count,
+        "reminder_time": notifier.reminder_time.strftime("%H:%M"),
+        "pending_reminder_invoice_id": notifier.pending_reminder_invoice_id,
     }

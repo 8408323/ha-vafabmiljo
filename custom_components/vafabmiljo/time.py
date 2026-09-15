@@ -27,6 +27,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import CONF_ADDRESS, CONF_CITY, CONF_PLANT_ID, DOMAIN, REMINDER_TIME_FIELD
 from .coordinator import VafabMiljoCoordinator
+from .invoices import DEFAULT_INVOICE_REMINDER_TIME, VafabMiljoInvoiceNotifier
 
 DEFAULT_REMINDER_TIME = time(19, 0)  # matches the backend's own default for a new device
 DEFAULT_NOTIFY_TIME = time(18, 0)
@@ -45,6 +46,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entities: list[TimeEntity] = [VafabMiljoNotifyTimeEntity(entry)]
     if coordinator.data.authenticated:
         entities.append(VafabMiljoReminderTimeEntity(coordinator, entry))
+        if coordinator.invoice_notifier is not None:
+            entities.append(VafabMiljoInvoiceReminderTimeEntity(entry, coordinator.invoice_notifier))
     async_add_entities(entities)
 
 
@@ -94,4 +97,29 @@ class VafabMiljoNotifyTimeEntity(TimeEntity, RestoreEntity):
 
     async def async_set_value(self, value: time) -> None:
         self._attr_native_value = value
+        self.async_write_ha_state()
+
+
+class VafabMiljoInvoiceReminderTimeEntity(TimeEntity):
+    """When, the day before an invoice is due, the `vafabmiljo_invoice_due_reminder` event fires.
+
+    Purely local state, persisted by the invoice notifier itself (not
+    RestoreEntity - the notifier needs the value before any entity exists,
+    right at setup, to schedule the timer).
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "invoice_reminder_time"
+
+    def __init__(self, entry: ConfigEntry, notifier: VafabMiljoInvoiceNotifier) -> None:
+        self._notifier = notifier
+        self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_invoice_reminder_time"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> time:
+        return self._notifier.reminder_time or DEFAULT_INVOICE_REMINDER_TIME
+
+    async def async_set_value(self, value: time) -> None:
+        await self._notifier.async_set_reminder_time(value)
         self.async_write_ha_state()

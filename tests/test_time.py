@@ -11,6 +11,7 @@ from vafabmiljo.coordinator import VafabMiljoData
 from vafabmiljo.time import (
     DEFAULT_NOTIFY_TIME,
     DEFAULT_REMINDER_TIME,
+    VafabMiljoInvoiceReminderTimeEntity,
     VafabMiljoNotifyTimeEntity,
     VafabMiljoReminderTimeEntity,
     async_setup_entry,
@@ -21,10 +22,11 @@ def _entry() -> ConfigEntry:
     return ConfigEntry(data={"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"})
 
 
-def _coordinator(authenticated: bool) -> Mock:
+def _coordinator(authenticated: bool, notifier=None) -> Mock:
     coordinator = Mock()
     coordinator.data = VafabMiljoData(pickups=[], authenticated=authenticated)
     coordinator.client = AsyncMock()
+    coordinator.invoice_notifier = notifier
     return coordinator
 
 
@@ -45,6 +47,30 @@ async def test_setup_adds_both_entities_when_authenticated():
     assert len(added) == 2
     assert isinstance(added[0], VafabMiljoNotifyTimeEntity)
     assert isinstance(added[1], VafabMiljoReminderTimeEntity)
+
+
+async def test_setup_adds_invoice_reminder_time_when_notifier_present():
+    entry = _entry()
+    notifier = Mock(reminder_time=time(18, 0))
+    entry.runtime_data = _coordinator(authenticated=True, notifier=notifier)
+    added: list = []
+    await async_setup_entry(hass=None, entry=entry, async_add_entities=added.extend)
+    assert len(added) == 3
+    assert isinstance(added[2], VafabMiljoInvoiceReminderTimeEntity)
+    assert added[2].native_value == time(18, 0)
+
+
+async def test_invoice_reminder_time_delegates_to_notifier():
+    notifier = Mock(reminder_time=None)
+    notifier.async_set_reminder_time = AsyncMock()
+    entity = VafabMiljoInvoiceReminderTimeEntity(_entry(), notifier)
+    entity.async_write_ha_state = Mock()
+    assert entity.native_value == time(18, 0)  # default while the notifier has none
+
+    await entity.async_set_value(time(9, 15))
+
+    notifier.async_set_reminder_time.assert_awaited_once_with(time(9, 15))
+    entity.async_write_ha_state.assert_called_once()
 
 
 def test_defaults_to_1900():

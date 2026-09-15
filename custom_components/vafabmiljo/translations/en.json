@@ -97,6 +97,9 @@
       },
       "notify_time": {
         "name": "Notification time"
+      },
+      "invoice_reminder_time": {
+        "name": "Invoice reminder time"
       }
     }
   },

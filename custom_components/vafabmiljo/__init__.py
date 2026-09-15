@@ -10,6 +10,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import VafabMiljoClient
 from .const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE
 from .coordinator import VafabMiljoCoordinator
+from .invoices import VafabMiljoInvoiceNotifier
 from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH, Platform.TIME]
@@ -26,6 +27,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = VafabMiljoCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    # Event-based new-invoice / due-reminder delivery (see invoices.py). Set up
+    # before the platforms so the invoice reminder-time entity can bind to it.
+    notifier = VafabMiljoInvoiceNotifier(hass, entry, coordinator)
+    coordinator.invoice_notifier = notifier
+    await notifier.async_setup()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     async_setup_services(hass)
@@ -39,4 +45,7 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    coordinator: VafabMiljoCoordinator = entry.runtime_data
+    if coordinator is not None and coordinator.invoice_notifier is not None:
+        coordinator.invoice_notifier.async_unload()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

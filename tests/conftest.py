@@ -80,12 +80,22 @@ def _install_stub_homeassistant() -> None:
                 service_data = schema(service_data or {})
             return await self._handlers[(domain, service)](ServiceCall(service_data))
 
+    class _EventBus:
+        def __init__(self) -> None:
+            self.fired: list[tuple[str, dict[str, Any]]] = []
+
+        def async_fire(self, event_type: str, event_data: dict[str, Any] | None = None) -> None:
+            self.fired.append((event_type, event_data or {}))
+
     class HomeAssistant:
         def __init__(self) -> None:
             self.data: dict[str, Any] = {}
             self.services = _ServiceRegistry()
+            self.bus = _EventBus()
             self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts))
             self.scheduled_jobs: list[Any] = []
+            # (action, when) pairs registered via async_track_point_in_time
+            self.scheduled_timers: list[tuple[Any, Any]] = []
 
         def async_create_task(self, coro, name=None):
             return asyncio.ensure_future(coro)
@@ -305,8 +315,38 @@ def _install_stub_homeassistant() -> None:
         hass.scheduled_jobs.append(action)
         return lambda: None
 
+    def async_track_point_in_time(hass, action, point_in_time):
+        item = (action, point_in_time)
+        hass.scheduled_timers.append(item)
+
+        def _unsub() -> None:
+            if item in hass.scheduled_timers:
+                hass.scheduled_timers.remove(item)
+
+        return _unsub
+
     event_mod.async_call_later = async_call_later
+    event_mod.async_track_point_in_time = async_track_point_in_time
     sys.modules["homeassistant.helpers.event"] = event_mod
+
+    storage_mod = types.ModuleType("homeassistant.helpers.storage")
+
+    class Store:
+        # In-memory stand-in for HA's JSON storage: data lives on the hass
+        # instance so a second Store for the same key (a "restart") sees it.
+        def __init__(self, hass, version: int, key: str) -> None:
+            self._hass = hass
+            self.key = key
+            self.version = version
+
+        async def async_load(self):
+            return self._hass.data.setdefault("_stores", {}).get(self.key)
+
+        async def async_save(self, data) -> None:
+            self._hass.data.setdefault("_stores", {})[self.key] = data
+
+    storage_mod.Store = Store
+    sys.modules["homeassistant.helpers.storage"] = storage_mod
 
     restore_state = types.ModuleType("homeassistant.helpers.restore_state")
 
@@ -329,6 +369,30 @@ def _install_stub_homeassistant() -> None:
 
     util.slugify = slugify
     sys.modules["homeassistant.util"] = util
+
+    dt_mod = types.ModuleType("homeassistant.util.dt")
+    from datetime import datetime as _datetime
+    from datetime import time as _time
+    from datetime import timezone as _timezone
+
+    dt_mod.DEFAULT_TIME_ZONE = _timezone.utc
+    # Tests pin "now" by setting this; None falls back to the real clock.
+    dt_mod.NOW_OVERRIDE = None
+
+    def _now():
+        return dt_mod.NOW_OVERRIDE or _datetime.now(dt_mod.DEFAULT_TIME_ZONE)
+
+    def _start_of_local_day(value=None):
+        if value is None:
+            value = _now()
+        if isinstance(value, _datetime):
+            value = value.date()
+        return _datetime.combine(value, _time(), tzinfo=dt_mod.DEFAULT_TIME_ZONE)
+
+    dt_mod.now = _now
+    dt_mod.start_of_local_day = _start_of_local_day
+    util.dt = dt_mod
+    sys.modules["homeassistant.util.dt"] = dt_mod
 
     # -- homeassistant.components.* ----------------------------------------------
     components = types.ModuleType("homeassistant.components")

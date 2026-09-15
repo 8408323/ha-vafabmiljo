@@ -37,6 +37,7 @@ async def test_setup_entry_creates_coordinator_and_forwards_platforms(monkeypatc
 
     assert result is True
     assert isinstance(entry.runtime_data, VafabMiljoCoordinator)
+    assert entry.runtime_data.invoice_notifier is not None
     hass.config_entries.async_forward_entry_setups.assert_awaited_once()
     assert len(entry._unload_callbacks) == 1
 
@@ -59,3 +60,16 @@ async def test_unload_entry_delegates_to_hass():
 
     assert result is True
     hass.config_entries.async_unload_platforms.assert_awaited_once()
+
+
+async def test_unload_entry_tears_down_invoice_notifier():
+    from unittest.mock import Mock
+
+    hass = _hass()
+    hass.config_entries.async_unload_platforms.return_value = True
+    entry = _entry()
+    entry.runtime_data = Mock()
+
+    await async_unload_entry(hass, entry)
+
+    entry.runtime_data.invoice_notifier.async_unload.assert_called_once()

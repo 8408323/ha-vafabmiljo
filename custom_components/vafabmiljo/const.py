@@ -65,3 +65,14 @@ BANKID_POLL_TIMEOUT = 300
 # Options-flow key: user-configurable poll interval, in minutes.
 CONF_SCAN_INTERVAL = "scan_interval"
 DEFAULT_SCAN_INTERVAL_MINUTES = 30  # this is a waste-collection calendar, not live data
+
+# --- Invoice events (see invoices.py) ---------------------------------------
+# Fired on the HA event bus exactly once per invoice, persisted across restarts,
+# so an automation triggered by them can never double-notify the way a state
+# trigger on the Latest invoice sensor's attributes does (that re-fires every
+# time the entity goes unavailable and back, e.g. on restart or a failed poll).
+EVENT_NEW_INVOICE = f"{DOMAIN}_new_invoice"
+EVENT_INVOICE_DUE_REMINDER = f"{DOMAIN}_invoice_due_reminder"
+# Invoice payment statuses (as the backend spells them) that mean "nothing to pay".
+PAID_STATUSES = {"helt betald"}
+INVOICE_STORAGE_VERSION = 1
