@@ -20,6 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _as_invoice_id(value: Any) -> int | None:
+    """Backend invoice ids are ints; accept numeric strings, reject everything else (incl. bools)."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):

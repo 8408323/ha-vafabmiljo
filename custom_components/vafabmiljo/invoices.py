@@ -39,7 +39,7 @@ from .const import (
     INVOICE_STORAGE_VERSION,
     PAID_STATUSES,
 )
-from .coordinator import VafabMiljoCoordinator
+from .coordinator import VafabMiljoCoordinator, _as_invoice_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +69,12 @@ _KEEP_FIELDS = ("id", "amount", "invoiceDate", "invoiceExpirationDate", "payment
 def _slim(invoice: dict[str, Any]) -> dict[str, Any]:
     """Only the fields this module uses - this list is persisted to storage."""
     return {k: invoice.get(k) for k in _KEEP_FIELDS}
+
+
+def _load_ids(values: Any) -> set[int]:
+    if not isinstance(values, list):
+        return set()
+    return {i for i in (_as_invoice_id(v) for v in values) if i is not None}
 
 
 def _is_paid(invoice: dict[str, Any]) -> bool:
@@ -111,8 +117,10 @@ class VafabMiljoInvoiceNotifier:
             # reminder time also writes the store, possibly before the first
             # valid invoice snapshot ever arrived.
             self._seeded = bool(stored.get("seeded", False))
-            self._announced = set(stored.get("announced", []))
-            self._reminded = set(stored.get("reminded", []))
+            # Normalise like the decoder does, so a store written with string
+            # ids can never mismatch the int ids of a fresh snapshot.
+            self._announced = _load_ids(stored.get("announced"))
+            self._reminded = _load_ids(stored.get("reminded"))
             # Last decoded invoice list, so a reminder can still be scheduled
             # (or caught up) after a restart whose first poll fails.
             self._last_invoices = [inv for inv in stored.get("invoices", []) if isinstance(inv, dict)]

@@ -439,6 +439,19 @@ async def test_reminder_recovers_after_restart_with_failed_first_poll():
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["invoices"][0]["paymentStatus"] == "Helt betald"
 
 
+async def test_store_with_string_or_junk_ids_is_normalised_on_load():
+    hass = HomeAssistant()
+    hass.data["_stores"] = {
+        "vafabmiljo.test_entry.invoices": {"seeded": True, "announced": ["5", 4, None, "x"], "reminded": "junk"}
+    }
+    coordinator = _coordinator([_inv(5), _inv(4)])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    await notifier.async_setup()
+    assert _events(hass, EVENT_NEW_INVOICE) == []  # "5" matched 5, nothing re-announced
+    assert notifier.announced_count == 2
+    assert notifier.reminded_count == 0
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])
