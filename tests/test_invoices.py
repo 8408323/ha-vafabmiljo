@@ -1051,6 +1051,59 @@ async def test_snapshot_refreshed_during_a_write_is_flushed_before_the_lock_is_r
     assert notifier._dirty is False
 
 
+async def test_invoice_gone_from_a_refreshed_snapshot_is_not_reminded():
+    import asyncio
+
+    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)  # catch-up path
+    hass = HomeAssistant()
+    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    original = notifier._store.async_save
+    calls = {"n": 0}
+
+    async def drop_midwrite(data):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the reminder marker write
+            coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": []})
+        await asyncio.sleep(0)
+        await original(data)
+
+    notifier._store.async_save = drop_midwrite
+    await notifier.async_setup()
+    notifier._store.async_save = original
+
+    # The account no longer reports it, so no reminder may reference it.
+    assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
+
+
+async def test_flushed_snapshot_recomputes_an_already_armed_timer():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, due="2026-12-01T00:00:00")])
+    assert notifier.pending_reminder_invoice_id == 1
+    original = notifier._store.async_save
+
+    async def boom(data):
+        raise OSError("disk full")
+
+    # A valid poll brings a nearer invoice, but its save fails, so scheduling
+    # never ran and the timer still points at the far one.
+    notifier._store.async_save = boom
+    coordinator.data = VafabMiljoData(
+        pickups=[],
+        authenticated=True,
+        invoices={"data": [_inv(2, due="2026-10-01T00:00:00"), _inv(1, due="2026-12-01T00:00:00")]},
+    )
+    with pytest.raises(OSError):
+        await notifier._async_check()
+    assert notifier.pending_reminder_invoice_id == 1
+
+    # Endpoint down: the retried flush must also recompute the timer.
+    notifier._store.async_save = original
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=None)
+    await notifier._async_check()
+    assert notifier.pending_reminder_invoice_id == 2
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])

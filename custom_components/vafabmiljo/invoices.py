@@ -390,12 +390,15 @@ class VafabMiljoInvoiceNotifier:
             # than cancelling it and hoping the next poll lands before the due
             # date - but if there is no timer at all (fresh restart), schedule
             # from the persisted last-known list.
-            if self._dirty or self._last_invoices != self._stored_invoices:
+            flushed = self._dirty or self._last_invoices != self._stored_invoices
+            if flushed:
                 # Not just markers: a snapshot change (an invoice turning paid)
                 # whose save failed must be retried too, or a restart would
                 # reload stale data and could schedule a settled invoice.
                 await self._async_save()
-            if self._unsub_timer is None and self._last_invoices:
+            if self._last_invoices and (flushed or self._unsub_timer is None):
+                # A snapshot that only now reached disk may name a nearer
+                # invoice than the armed timer, which was computed before it.
                 await self._async_schedule_reminder()
             return
         if not self._seeded:
@@ -511,9 +514,18 @@ class VafabMiljoInvoiceNotifier:
                 # (or reaching its due date) in the meantime must not produce a
                 # "due tomorrow" reminder. Its marker stays either way - a
                 # settled invoice needs no reminder later.
-                latest = self._invoice_by_id(inv["id"]) or inv
-                latest_due = _parse_date(latest.get("invoiceExpirationDate"))
-                if not _is_paid(latest) and latest_due is not None and latest_due > dt_util.now().date():
+                # No fallback to the row captured before the write: if a valid
+                # refreshed snapshot no longer lists this invoice, the account
+                # does not have it any more. (With no usable snapshot,
+                # _invoices() still serves the cached row, so this finds it.)
+                latest = self._invoice_by_id(inv["id"])
+                latest_due = _parse_date(latest.get("invoiceExpirationDate")) if latest is not None else None
+                if (
+                    latest is not None
+                    and not _is_paid(latest)
+                    and latest_due is not None
+                    and latest_due > dt_util.now().date()
+                ):
                     self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(latest))
                     _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
                 else:
