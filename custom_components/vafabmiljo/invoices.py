@@ -161,6 +161,8 @@ class VafabMiljoInvoiceNotifier:
             self._stored_invoices = list(self._last_invoices)
             if stored.get("reminder_time"):
                 self._reminder_time = time.fromisoformat(stored["reminder_time"])
+        if self._dirty:
+            await self._async_save()
         self._unsub_listener = self._coordinator.async_add_listener(self._handle_coordinator_update)
         # During a cold HA start this entry may be set up before the automation
         # integration has its event listeners in place; an event fired now would
