@@ -872,6 +872,49 @@ async def test_only_a_real_true_counts_as_seeded(flag):
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["seeded"] is True
 
 
+@pytest.mark.parametrize("stored", [{"seeded": True}, {"seeded": True, "announced": "x", "reminded": []}])
+async def test_truncated_store_is_not_trusted_as_seeded(stored):
+    hass = HomeAssistant()
+    hass.data["_stores"] = {"vafabmiljo.test_entry.invoices": stored}
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1), _inv(2)]))
+    await notifier.async_setup()
+    # Must re-baseline rather than announce the existing history as new.
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+    assert notifier.announced_count == 2
+
+
+async def test_unload_during_load_skips_the_reconfigure_reset_write():
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1)])
+    notifier.async_unload()
+    gate = asyncio.Event()
+    stored = dict(hass.data["_stores"]["vafabmiljo.test_entry.invoices"])
+
+    # New property (same entry_id) -> the reset marks state dirty.
+    entry = ConfigEntry(data={"address": "Nygatan 2", "city": "Teststad", "plant_id": "p2"})
+    fresh = VafabMiljoInvoiceNotifier(hass, entry, coordinator)
+    original_load = fresh._store.async_load
+
+    async def slow_load():
+        await gate.wait()
+        return stored
+
+    fresh._store.async_load = slow_load
+    setup = asyncio.ensure_future(fresh.async_setup())
+    await asyncio.sleep(0)
+    fresh.async_unload()  # e.g. entry removal, which deletes the store
+    hass.data["_stores"].pop("vafabmiljo.test_entry.invoices")
+    gate.set()
+    await setup
+    fresh._store.async_load = original_load
+
+    # The reset write must not have resurrected the deleted store.
+    assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+    assert coordinator.listeners == []
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])

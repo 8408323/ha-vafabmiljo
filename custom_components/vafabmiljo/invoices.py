@@ -154,11 +154,11 @@ class VafabMiljoInvoiceNotifier:
         self._seeded = False
         self._last_invoices: list[dict[str, Any]] = []
         self._stored_invoices: list[dict[str, Any]] = []  # what the store currently holds
-        # Set on unload. In-flight checks are deliberately *not* cancelled: the
-        # only suspension point in a check sits between firing an event and
-        # persisting it, and cancelling there would forget a delivered event
-        # (= the double notification this module exists to prevent). Instead a
-        # stale task finishes its save and is then refused any new scheduling.
+        # Set on unload. In-flight checks are deliberately *not* cancelled:
+        # a check persists the marker and only then fires the event, so
+        # cancelling it mid-save would abandon a write that may already have
+        # landed. Instead the task runs to completion - rolling its marker back
+        # if the save did not finish - and is then refused any new scheduling.
         self._unloaded = False
         self._unsub_started = None
         self.pending_reminder_invoice_id: int | None = None
@@ -211,7 +211,14 @@ class VafabMiljoInvoiceNotifier:
             # Only a real boolean True counts: bool("false") and bool([0]) are
             # both truthy, and a corrupt flag would skip the first-run baseline
             # and announce the whole invoice history as new.
-            self._seeded = stored.get("seeded") is True
+            # Trust "seeded" only when the fields it implies are well formed:
+            # a truncated store of {"seeded": true} would otherwise baseline
+            # nothing and then announce the entire invoice history as new.
+            self._seeded = (
+                stored.get("seeded") is True
+                and isinstance(stored.get("announced"), list)
+                and isinstance(stored.get("reminded"), list)
+            )
             # Normalise like the decoder does, so a store written with string
             # ids can never mismatch the int ids of a fresh snapshot.
             self._announced = _load_ids(stored.get("announced"))
@@ -225,7 +232,9 @@ class VafabMiljoInvoiceNotifier:
                     self._reminder_time = time.fromisoformat(stored["reminder_time"])
                 except (TypeError, ValueError):
                     _LOGGER.warning("Ignoring malformed persisted reminder time %r", stored["reminder_time"])
-        if self._dirty:
+        if self._dirty and not self._unloaded:
+            # Unloaded while the read was in flight: entry removal may already
+            # have deleted this store, and writing now would resurrect it.
             await self._async_save()
 
     @property
