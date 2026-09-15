@@ -206,3 +206,6 @@ def test_as_invoice_id_rejects_malformed_values_without_raising():
     assert _as_invoice_id("1_0") is None
     assert _as_invoice_id("\uff11\uff10") is None
     assert _as_invoice_id("-5") == -5
+    # Past sys.int_max_str_digits int() raises; a corrupt stored id must not
+    # abort entry setup.
+    assert _as_invoice_id("1" * 5000) is None

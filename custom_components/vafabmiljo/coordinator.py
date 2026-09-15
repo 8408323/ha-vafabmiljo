@@ -40,7 +40,13 @@ def _as_invoice_id(value: Any) -> int | None:
         # and accepts full-width digits, while str.isdigit() is true for
         # characters int() refuses outright.
         if _DECIMAL_RE.fullmatch(value.strip()):
-            return int(value)
+            try:
+                return int(value)
+            except ValueError:
+                # CPython refuses to convert strings past sys.int_max_str_digits
+                # (4300 by default), and this helper must never raise: it also
+                # decodes ids read back from storage, during entry setup.
+                return None
     return None
 
 
