@@ -103,7 +103,10 @@ class VafabMiljoNotifyTimeEntity(TimeEntity, RestoreEntity):
 
 
 class VafabMiljoInvoiceReminderTimeEntity(TimeEntity):
-    """When, the day before an invoice is due, the `vafabmiljo_invoice_due_reminder` event fires.
+    """Time of day at which the day-before-due invoice reminder is delivered.
+
+    The integration fires `vafabmiljo_invoice_due_reminder` at this time on the
+    day before an unpaid invoice's due date.
 
     Purely local state, persisted by the invoice notifier itself (not
     RestoreEntity - the notifier needs the value before any entity exists,

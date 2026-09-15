@@ -19,6 +19,7 @@ rather than tied to the 30-minute poll cadence.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import logging
 from datetime import date, datetime, time, timedelta
@@ -124,6 +125,10 @@ class VafabMiljoInvoiceNotifier:
         self._coordinator = coordinator
         self._store: Store = Store(hass, INVOICE_STORAGE_VERSION, _store_key(entry))
         self._lock = _store_lock(hass, _store_key(entry))
+        # Serialises every marker decision with the save that records it, so a
+        # concurrent check can neither persist a marker another task is about
+        # to roll back nor reschedule a timer from a value still being written.
+        self._work_lock = asyncio.Lock()
         # Captured now: a reconfigure flow mutates entry.data before reloading,
         # and a save of *this* instance must keep labelling its state with the
         # property it actually belongs to.
@@ -161,6 +166,22 @@ class VafabMiljoInvoiceNotifier:
     # -- lifecycle -------------------------------------------------------------
 
     async def async_setup(self) -> None:
+        async with self._work_lock:
+            await self._async_load()
+        self._unsub_listener = self._coordinator.async_add_listener(self._handle_coordinator_update)
+        # During a cold HA start this entry may be set up before the automation
+        # integration has its event listeners in place; an event fired now would
+        # be persisted as delivered yet reach nobody. Nothing is checked - not
+        # the first pass, not a coordinator refresh - until HA is fully running
+        # (CoreState.running, the same state automations wait for; note
+        # hass.is_running is already True in CoreState.starting). A reload of
+        # an already-running HA checks immediately.
+        if self._ha_running:
+            await self._async_check()
+        else:
+            self._unsub_started = async_at_started(self._hass, self._handle_started)
+
+    async def _async_load(self) -> None:
         async with self._lock:
             stored = await self._store.async_load()
         if stored is not None and stored.get("plant_id") not in (None, self._plant_id):
@@ -190,18 +211,6 @@ class VafabMiljoInvoiceNotifier:
                 self._reminder_time = time.fromisoformat(stored["reminder_time"])
         if self._dirty:
             await self._async_save()
-        self._unsub_listener = self._coordinator.async_add_listener(self._handle_coordinator_update)
-        # During a cold HA start this entry may be set up before the automation
-        # integration has its event listeners in place; an event fired now would
-        # be persisted as delivered yet reach nobody. Nothing is checked - not
-        # the first pass, not a coordinator refresh - until HA is fully running
-        # (CoreState.running, the same state automations wait for; note
-        # hass.is_running is already True in CoreState.starting). A reload of
-        # an already-running HA checks immediately.
-        if self._ha_running:
-            await self._async_check()
-        else:
-            self._unsub_started = async_at_started(self._hass, self._handle_started)
 
     @property
     def _ha_running(self) -> bool:
@@ -243,16 +252,20 @@ class VafabMiljoInvoiceNotifier:
         return len(self._reminded)
 
     async def async_set_reminder_time(self, value: time) -> None:
-        previous = self._reminder_time
-        self._reminder_time = value
-        try:
-            await self._async_save()
-        except Exception:
-            # Keep value and timer consistent: the entity would otherwise show
-            # the new time while the armed timer still fires at the old one.
-            self._reminder_time = previous
-            raise
-        await self._async_schedule_reminder()
+        async with self._work_lock:
+            previous = self._reminder_time
+            self._reminder_time = value
+            try:
+                await self._async_save()
+            except Exception:
+                # Keep value and timer consistent: the entity would otherwise
+                # show the new time while a timer sits armed at the rejected
+                # one. Best-effort restore, without masking the save error.
+                self._reminder_time = previous
+                with contextlib.suppress(Exception):
+                    await self._async_schedule_reminder()
+                raise
+            await self._async_schedule_reminder()
 
     # -- internals -------------------------------------------------------------
 
@@ -299,6 +312,10 @@ class VafabMiljoInvoiceNotifier:
         self._saved_gen = max(self._saved_gen, gen)
 
     async def _async_check(self) -> None:
+        async with self._work_lock:
+            await self._async_check_locked()
+
+    async def _async_check_locked(self) -> None:
         if self._unloaded:
             return
         if not self._has_snapshot():
@@ -426,11 +443,12 @@ class VafabMiljoInvoiceNotifier:
         )
 
     async def _async_on_timer(self, token: int, _now: datetime) -> None:
-        if token != self._timer_token:
-            # Stale: this timer was cancelled and replaced after its callback
-            # had already been queued. Clearing the handle here would orphan
-            # the replacement timer.
-            return
-        self._unsub_timer = None
-        self.pending_reminder_invoice_id = None
-        await self._async_schedule_reminder()
+        async with self._work_lock:
+            if token != self._timer_token:
+                # Stale: this timer was cancelled and replaced after its
+                # callback had already been queued (possibly while waiting for
+                # this lock). Clearing the handle would orphan the replacement.
+                return
+            self._unsub_timer = None
+            self.pending_reminder_invoice_id = None
+            await self._async_schedule_reminder()

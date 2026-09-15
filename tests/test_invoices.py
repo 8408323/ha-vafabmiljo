@@ -675,6 +675,63 @@ async def test_stale_timer_callback_does_not_orphan_the_replacement():
     assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
 
 
+async def test_checks_are_serialised_so_a_concurrent_save_cannot_persist_a_rolled_back_marker():
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(8)]})
+    original = notifier._store.async_save
+    gate = asyncio.Event()
+    started = asyncio.Event()
+
+    async def failing(data):
+        started.set()
+        await gate.wait()
+        raise OSError("disk full")
+
+    notifier._store.async_save = failing
+    first = asyncio.ensure_future(notifier._async_check())
+    await started.wait()
+
+    # A second check must not run (and must not persist 8) while the first
+    # holds the work lock and is about to roll its marker back.
+    second = asyncio.ensure_future(notifier._async_check())
+    await asyncio.sleep(0)
+    assert not second.done()
+
+    # Swap the store back before releasing: the first save is already inside
+    # `failing`, and the second check resumes the moment the lock is freed.
+    notifier._store.async_save = original
+    gate.set()
+    with pytest.raises(OSError):
+        await first
+    await second
+
+    # Exactly one delivery, and the marker on disk matches what was delivered.
+    assert [e["invoice_id"] for e in _events(hass, EVENT_NEW_INVOICE)] == [8]
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [8]
+
+
+async def test_failed_reminder_time_save_restores_the_previous_schedule():
+    hass = HomeAssistant()
+    notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    original = notifier._store.async_save
+
+    async def boom(data):
+        raise OSError("disk full")
+
+    notifier._store.async_save = boom
+    with pytest.raises(OSError):
+        await notifier.async_set_reminder_time(time(7, 0))
+
+    notifier._store.async_save = original
+    assert notifier.reminder_time == time(18, 0)
+    # The armed timer matches the restored value, not the rejected one.
+    assert len(hass.scheduled_timers) == 1
+    assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])
