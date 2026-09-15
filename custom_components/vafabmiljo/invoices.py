@@ -447,6 +447,9 @@ class VafabMiljoInvoiceNotifier:
         self._timer_token += 1
         self.pending_reminder_invoice_id = None
 
+    def _invoice_by_id(self, invoice_id: int) -> dict[str, Any] | None:
+        return next((inv for inv in self._invoices() if inv["id"] == invoice_id), None)
+
     def _next_reminder_candidate(self, today: date) -> tuple[dict[str, Any], date] | None:
         """The unpaid, not-yet-reminded invoice with the nearest due date still strictly ahead.
 
@@ -482,14 +485,25 @@ class VafabMiljoInvoiceNotifier:
             # rather than silently skipping it, then look for the next one.
             self._reminded.add(inv["id"])
             self._mark_dirty()
-            delivered = False
+            settled = False
             try:
                 await self._async_save()
-                self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(inv))
-                _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
-                delivered = True
+                # A coordinator refresh is not held by the work lock and can
+                # replace the snapshot while that write is in flight, so the
+                # candidate is re-read before it is announced: an invoice paid
+                # (or reaching its due date) in the meantime must not produce a
+                # "due tomorrow" reminder. Its marker stays either way - a
+                # settled invoice needs no reminder later.
+                latest = self._invoice_by_id(inv["id"]) or inv
+                latest_due = _parse_date(latest.get("invoiceExpirationDate"))
+                if not _is_paid(latest) and latest_due is not None and latest_due > dt_util.now().date():
+                    self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(latest))
+                    _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
+                else:
+                    _LOGGER.debug("Invoice %s settled while persisting; reminder skipped", inv["id"])
+                settled = True
             finally:
-                if not delivered:
+                if not settled:
                     self._reminded.discard(inv["id"])
             await self._async_schedule_reminder()
             return

@@ -975,6 +975,48 @@ async def test_unload_during_load_skips_the_reconfigure_reset_write():
     assert coordinator.listeners == []
 
 
+@pytest.mark.parametrize(
+    ("changed", "expect_event"),
+    [
+        ({"status": "Helt betald"}, False),  # paid while the marker was being written
+        ({"due": "2026-09-29T00:00:00"}, False),  # due date moved to today
+        ({}, True),  # unchanged: still delivered
+    ],
+)
+async def test_catch_up_reminder_revalidates_after_the_write(changed, expect_event):
+    import asyncio
+
+    # now = the evening after the 18:00 reminder moment for an invoice due
+    # tomorrow, i.e. the catch-up branch.
+    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)
+    hass = HomeAssistant()
+    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    original = notifier._store.async_save
+
+    calls = {"n": 0}
+
+    async def refresh_midwrite(data):
+        # Save #1 is the first-run baseline; #2 is the reminder marker, which
+        # is the write this race is about. The coordinator is not held by the
+        # work lock, so a refresh can land while it is in flight.
+        calls["n"] += 1
+        if changed and calls["n"] == 2:
+            kwargs = {"due": "2026-09-30T00:00:00"} | changed
+            coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(1, **kwargs)]})
+        await asyncio.sleep(0)
+        await original(data)
+
+    notifier._store.async_save = refresh_midwrite
+    await notifier.async_setup()
+    notifier._store.async_save = original
+
+    events = _events(hass, EVENT_INVOICE_DUE_REMINDER)
+    assert bool(events) is expect_event
+    # The marker is kept either way: a settled invoice needs no reminder later.
+    assert notifier.reminded_count == 1
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])
