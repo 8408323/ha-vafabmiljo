@@ -102,8 +102,11 @@ automation:
   # `mode: queued`: several events can arrive back-to-back (a burst of new
   # invoices, or catch-up reminders after downtime); the default `single`
   # mode would drop the later ones while the first notification is running.
+  # `max` is spelled out because the default queue bound is 10, which would
+  # silently discard an eleventh event in the same burst.
   - alias: "VafabMiljö - notify about new invoice"
     mode: queued
+    max: 25
     trigger:
       - platform: event
         event_type: vafabmiljo_new_invoice
@@ -136,6 +139,7 @@ automation:
   # as above. Invoices the backend already marks as paid never get one.
   - alias: "VafabMiljö - remind about invoice due tomorrow"
     mode: queued
+    max: 25
     trigger:
       - platform: event
         event_type: vafabmiljo_invoice_due_reminder

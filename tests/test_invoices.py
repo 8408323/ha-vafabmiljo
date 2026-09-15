@@ -774,6 +774,83 @@ async def test_cancelled_reminder_save_leaves_the_reminder_retryable():
     assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
 
 
+@pytest.mark.parametrize("stored", [["not", "a", "mapping"], "junk", 42])
+async def test_malformed_persisted_state_is_ignored_instead_of_aborting_setup(stored):
+    hass = HomeAssistant()
+    hass.data["_stores"] = {"vafabmiljo.test_entry.invoices": stored}
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1)]))
+    await notifier.async_setup()
+    # Treated as no state at all: re-baselined, nothing announced.
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+    assert notifier.announced_count == 1
+
+
+async def test_malformed_persisted_reminder_time_falls_back_to_the_default():
+    hass = HomeAssistant()
+    hass.data["_stores"] = {
+        "vafabmiljo.test_entry.invoices": {
+            "seeded": True,
+            "plant_id": "p1",
+            "announced": [1],
+            "reminded": [],
+            "reminder_time": "not-a-time",
+            "invoices": [],
+        }
+    }
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1)]))
+    await notifier.async_setup()
+    assert notifier.reminder_time == time(18, 0)
+
+
+async def test_unload_during_setup_does_not_attach_a_listener():
+    import asyncio
+
+    hass = HomeAssistant()
+    coordinator = _coordinator([_inv(1)])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    gate = asyncio.Event()
+
+    async def slow_load():
+        await gate.wait()
+        return None
+
+    notifier._store.async_load = slow_load
+    setup = asyncio.ensure_future(notifier.async_setup())
+    await asyncio.sleep(0)
+    notifier.async_unload()
+    gate.set()
+    await setup
+    assert coordinator.listeners == []
+
+
+async def test_reminder_time_is_refused_after_unload():
+    hass = HomeAssistant()
+    notifier, _ = await _setup(hass, [_inv(1)])
+    before = dict(hass.data["_stores"]["vafabmiljo.test_entry.invoices"])
+    notifier.async_unload()
+    await notifier.async_set_reminder_time(time(7, 0))
+    assert notifier.reminder_time == time(18, 0)
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"] == before
+
+
+async def test_cancelled_reminder_time_save_restores_value_and_schedule():
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    original = notifier._store.async_save
+
+    async def cancelled(data):
+        raise asyncio.CancelledError
+
+    notifier._store.async_save = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await notifier.async_set_reminder_time(time(7, 0))
+    notifier._store.async_save = original
+    assert notifier.reminder_time == time(18, 0)
+    assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
+
+
 async def test_unload_is_safe_to_call_twice():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1)])

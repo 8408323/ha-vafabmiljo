@@ -168,6 +168,10 @@ class VafabMiljoInvoiceNotifier:
     async def async_setup(self) -> None:
         async with self._work_lock:
             await self._async_load()
+        if self._unloaded:
+            # Unloaded while the store read was in flight - attaching now would
+            # leave a listener behind on a notifier nobody will unload again.
+            return
         self._unsub_listener = self._coordinator.async_add_listener(self._handle_coordinator_update)
         # During a cold HA start this entry may be set up before the automation
         # integration has its event listeners in place; an event fired now would
@@ -184,6 +188,12 @@ class VafabMiljoInvoiceNotifier:
     async def _async_load(self) -> None:
         async with self._lock:
             stored = await self._store.async_load()
+        if not isinstance(stored, dict):
+            # Corrupt or foreign-format state must not abort entry setup; treat
+            # anything that is not a mapping as no state at all.
+            if stored is not None:
+                _LOGGER.warning("Ignoring malformed persisted invoice state (%s)", type(stored).__name__)
+            stored = None
         if stored is not None and stored.get("plant_id") not in (None, self._plant_id):
             # The entry was reconfigured to another address (same entry_id):
             # the old property's announced/reminded/cached state must not
@@ -208,7 +218,10 @@ class VafabMiljoInvoiceNotifier:
             self._last_invoices = _load_invoices(stored.get("invoices"))
             self._stored_invoices = list(self._last_invoices)
             if stored.get("reminder_time"):
-                self._reminder_time = time.fromisoformat(stored["reminder_time"])
+                try:
+                    self._reminder_time = time.fromisoformat(stored["reminder_time"])
+                except (TypeError, ValueError):
+                    _LOGGER.warning("Ignoring malformed persisted reminder time %r", stored["reminder_time"])
         if self._dirty:
             await self._async_save()
 
@@ -253,18 +266,26 @@ class VafabMiljoInvoiceNotifier:
 
     async def async_set_reminder_time(self, value: time) -> None:
         async with self._work_lock:
+            if self._unloaded:
+                # A queued entity call that got the lock after teardown; saving
+                # here could recreate a store that entry removal just deleted.
+                return
             previous = self._reminder_time
             self._reminder_time = value
+            saved = False
             try:
                 await self._async_save()
-            except Exception:
-                # Keep value and timer consistent: the entity would otherwise
-                # show the new time while a timer sits armed at the rejected
-                # one. Best-effort restore, without masking the save error.
-                self._reminder_time = previous
-                with contextlib.suppress(Exception):
-                    await self._async_schedule_reminder()
-                raise
+                saved = True
+            finally:
+                if not saved:
+                    # Keep value and timer consistent: the entity would
+                    # otherwise show the new time while a timer sits armed at
+                    # the rejected one. `finally`, not `except Exception`, so
+                    # cancellation restores it too. Best effort - the original
+                    # error must not be masked.
+                    self._reminder_time = previous
+                    with contextlib.suppress(Exception):
+                        await self._async_schedule_reminder()
             await self._async_schedule_reminder()
 
     # -- internals -------------------------------------------------------------
