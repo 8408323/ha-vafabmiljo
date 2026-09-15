@@ -638,11 +638,7 @@ async def test_cached_invoice_ids_are_normalised_on_load():
             "announced": [5],
             "reminded": [5],
             "reminder_time": "18:00:00",
-            "invoices": [
-                {"id": "5", "invoiceExpirationDate": "2026-09-30T00:00:00", "paymentStatus": "Obetald"},
-                {"id": None},
-                "junk",
-            ],
+            "invoices": [{"id": "5", "invoiceExpirationDate": "2026-09-30T00:00:00", "paymentStatus": "Obetald"}],
         }
     }
     coordinator = _coordinator(None)  # endpoint down: the cache is all we have
@@ -652,6 +648,63 @@ async def test_cached_invoice_ids_are_normalised_on_load():
     # "5" matched the reminded marker 5, so no duplicate reminder was armed.
     assert hass.scheduled_timers == []
     assert notifier.pending_reminder_invoice_id is None
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        {"announced": [None]},
+        {"announced": ["x"]},
+        {"reminded": [[]]},
+        {"invoices": [{"id": None}]},
+        {"invoices": ["junk"]},
+    ],
+)
+async def test_any_malformed_marker_entry_falls_back_to_baselining(field):
+    hass = HomeAssistant()
+    stored = {
+        "seeded": True,
+        "plant_id": "p1",
+        "announced": [],
+        "reminded": [],
+        "reminder_time": "18:00:00",
+        "invoices": [],
+    }
+    stored.update(field)
+    hass.data["_stores"] = {"vafabmiljo.test_entry.invoices": stored}
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1), _inv(2)]))
+    await notifier.async_setup()
+    # Partial markers must never be trusted: re-baseline instead of announcing
+    # everything the dropped entries covered.
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+    assert notifier.announced_count == 2
+
+
+async def test_unsaved_snapshot_is_retried_when_the_next_poll_has_none():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, status="Obetald", due="2026-09-30T00:00:00")])
+    original = notifier._store.async_save
+
+    async def boom(data):
+        raise OSError("disk full")
+
+    # A valid poll marks the invoice paid; its save fails, and no marker changed.
+    notifier._store.async_save = boom
+    coordinator.data = VafabMiljoData(
+        pickups=[],
+        authenticated=True,
+        invoices={"data": [_inv(1, status="Helt betald", due="2026-09-30T00:00:00")]},
+    )
+    with pytest.raises(OSError):
+        await notifier._async_check()
+    assert notifier._dirty is False  # generation unchanged: only the snapshot moved
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["invoices"][0]["paymentStatus"] == "Obetald"
+
+    # Endpoint then goes down - the stale snapshot must still be retried.
+    notifier._store.async_save = original
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=None)
+    await notifier._async_check()
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["invoices"][0]["paymentStatus"] == "Helt betald"
 
 
 async def test_stale_timer_callback_does_not_orphan_the_replacement():

@@ -88,27 +88,41 @@ def _slim(invoice: dict[str, Any]) -> dict[str, Any]:
     return {k: invoice.get(k) for k in _KEEP_FIELDS}
 
 
-def _load_ids(values: Any) -> set[int]:
-    if not isinstance(values, list):
-        return set()
-    return {i for i in (_as_invoice_id(v) for v in values) if i is not None}
+def _load_ids(values: Any) -> set[int] | None:
+    """Marker ids from storage, or None if the field is not a list of valid ids.
 
-
-def _load_invoices(values: Any) -> list[dict[str, Any]]:
-    """Cached invoice rows from storage, ids normalised exactly like the decoder's.
-
-    Anything else would let a stored "5" miss a marker holding 5, and mixing
-    types in the marker sets makes their sorted() persistence raise.
+    Dropping a malformed entry silently would leave a *partial* marker set that
+    still looks seeded, and the next snapshot would then announce every invoice
+    the dropped entries covered.
     """
     if not isinstance(values, list):
-        return []
+        return None
+    out: set[int] = set()
+    for value in values:
+        invoice_id = _as_invoice_id(value)
+        if invoice_id is None:
+            return None
+        out.add(invoice_id)
+    return out
+
+
+def _load_invoices(values: Any) -> list[dict[str, Any]] | None:
+    """Cached invoice rows from storage with ids normalised, or None if any row is malformed.
+
+    Normalising matters so a stored "5" cannot miss a marker holding 5; rejecting
+    the whole cache on a bad row matters because a silently shortened cache still
+    looks authoritative to the reminder scheduler.
+    """
+    if not isinstance(values, list):
+        return None
     out: list[dict[str, Any]] = []
     for inv in values:
         if not isinstance(inv, dict):
-            continue
+            return None
         invoice_id = _as_invoice_id(inv.get("id"))
-        if invoice_id is not None:
-            out.append({**inv, "id": invoice_id})
+        if invoice_id is None:
+            return None
+        out.append({**inv, "id": invoice_id})
     return out
 
 
@@ -211,22 +225,21 @@ class VafabMiljoInvoiceNotifier:
             # Only a real boolean True counts: bool("false") and bool([0]) are
             # both truthy, and a corrupt flag would skip the first-run baseline
             # and announce the whole invoice history as new.
-            # Trust "seeded" only when the fields it implies are well formed:
-            # a truncated store of {"seeded": true} would otherwise baseline
-            # nothing and then announce the entire invoice history as new.
+            # Every persisted field must be wholly valid before "seeded" is
+            # believed: a truncated or partially malformed store would
+            # otherwise look baselined while holding incomplete markers, and
+            # the next snapshot would announce the entire invoice history.
+            announced = _load_ids(stored.get("announced"))
+            reminded = _load_ids(stored.get("reminded"))
+            # Cached invoice rows let a reminder still be scheduled (or caught
+            # up) after a restart whose first poll fails.
+            invoices = _load_invoices(stored.get("invoices"))
             self._seeded = (
-                stored.get("seeded") is True
-                and isinstance(stored.get("announced"), list)
-                and isinstance(stored.get("reminded"), list)
-                and isinstance(stored.get("invoices"), list)
+                stored.get("seeded") is True and announced is not None and reminded is not None and invoices is not None
             )
-            # Normalise like the decoder does, so a store written with string
-            # ids can never mismatch the int ids of a fresh snapshot.
-            self._announced = _load_ids(stored.get("announced"))
-            self._reminded = _load_ids(stored.get("reminded"))
-            # Last decoded invoice list, so a reminder can still be scheduled
-            # (or caught up) after a restart whose first poll fails.
-            self._last_invoices = _load_invoices(stored.get("invoices"))
+            self._announced = announced if announced is not None else set()
+            self._reminded = reminded if reminded is not None else set()
+            self._last_invoices = invoices if invoices is not None else []
             self._stored_invoices = list(self._last_invoices)
             if stored.get("reminder_time"):
                 try:
@@ -360,7 +373,10 @@ class VafabMiljoInvoiceNotifier:
             # than cancelling it and hoping the next poll lands before the due
             # date - but if there is no timer at all (fresh restart), schedule
             # from the persisted last-known list.
-            if self._dirty:
+            if self._dirty or self._last_invoices != self._stored_invoices:
+                # Not just markers: a snapshot change (an invoice turning paid)
+                # whose save failed must be retried too, or a restart would
+                # reload stale data and could schedule a settled invoice.
                 await self._async_save()
             if self._unsub_timer is None and self._last_invoices:
                 await self._async_schedule_reminder()
