@@ -543,6 +543,19 @@ async def test_reconfigured_property_resets_persisted_state_but_keeps_reminder_t
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["plant_id"] == "p2"
 
 
+async def test_reconfigure_reset_is_persisted_even_if_the_new_property_has_no_snapshot_yet():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1)])
+    notifier.async_unload()
+    entry = ConfigEntry(data={"address": "Nygatan 2", "city": "Teststad", "plant_id": "p2"})
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=None)  # endpoint down
+    fresh = VafabMiljoInvoiceNotifier(hass, entry, coordinator)
+    await fresh.async_setup()
+    stored = hass.data["_stores"]["vafabmiljo.test_entry.invoices"]
+    assert stored["plant_id"] == "p2"
+    assert stored["announced"] == [] and stored["invoices"] == [] and stored["seeded"] is False
+
+
 async def test_store_lock_is_shared_per_entry_and_remove_waits_for_it():
     import asyncio
 

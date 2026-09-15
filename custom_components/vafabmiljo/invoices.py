@@ -142,6 +142,10 @@ class VafabMiljoInvoiceNotifier:
             # carry over. Keep only the user's reminder time.
             _LOGGER.debug("Bound property changed; resetting persisted invoice state")
             stored = {"reminder_time": stored.get("reminder_time")}
+            # Persist the sanitized state right away rather than only with the
+            # first valid snapshot - the old property's cached invoices (OCR
+            # numbers included) must not linger on disk if that never comes.
+            self._dirty = True
         if stored is not None:
             # An explicit flag, not the store's mere existence: changing the
             # reminder time also writes the store, possibly before the first
