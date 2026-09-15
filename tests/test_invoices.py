@@ -132,18 +132,55 @@ async def test_coordinator_update_triggers_a_check():
     assert coordinator.listeners == []
 
 
-async def test_missing_or_malformed_invoice_data_is_ignored():
+async def test_failed_first_poll_defers_seeding_until_a_valid_snapshot():
     hass = HomeAssistant()
-    notifier, coordinator = await _setup(hass, None)  # invoices endpoint failed
+    notifier, coordinator = await _setup(hass, None)  # invoices endpoint failed on first refresh
     assert notifier.announced_count == 0
-    coordinator.data = VafabMiljoData(
-        pickups=[], authenticated=True, invoices={"data": [{"item": {"amount": 1}}, {"item": "junk"}, _inv(5)]}
-    )
+    assert "vafabmiljo.test_entry.invoices" not in hass.data.get("_stores", {})  # not baselined on an empty set
+
+    # First valid snapshot = the baseline; the existing history is NOT announced.
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(2), _inv(1)]})
     await notifier._async_check()
-    assert [e["invoice_id"] for e in _events(hass, EVENT_NEW_INVOICE)] == [5]
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [1, 2]
+
+    # ...and only genuinely new invoices after that are.
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(3), _inv(2), _inv(1)]})
+    await notifier._async_check()
+    assert [e["invoice_id"] for e in _events(hass, EVENT_NEW_INVOICE)] == [3]
+
+
+@pytest.mark.parametrize(
+    "invoices",
+    [
+        None,  # endpoint failed
+        {"data": None},
+        {"data": "junk"},
+        {"data": [None, "junk", {"item": None}, {"item": "junk"}, {"item": {"amount": 1}}]},
+    ],
+)
+async def test_malformed_invoice_envelopes_are_ignored(invoices):
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, status="Helt betald")])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=invoices)
+    await notifier._async_check()
+    assert _events(hass, EVENT_NEW_INVOICE) == []
     coordinator.data = None  # e.g. before the first refresh completed
     await notifier._async_check()
-    assert len(_events(hass, EVENT_NEW_INVOICE)) == 1
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+
+
+async def test_failed_poll_keeps_the_pending_reminder_timer():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    assert len(hass.scheduled_timers) == 1
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=None)
+    await notifier._async_check()
+    assert len(hass.scheduled_timers) == 1
+    assert notifier.pending_reminder_invoice_id == 1
+    # The timer still fires from the cached data even though the poll failed.
+    await _fire_timer(hass)
+    assert [e["invoice_id"] for e in _events(hass, EVENT_INVOICE_DUE_REMINDER)] == [1]
 
 
 async def test_reminder_is_scheduled_the_day_before_due_at_reminder_time():
@@ -187,6 +224,7 @@ async def test_missed_reminder_is_sent_immediately_while_invoice_still_not_due()
         [_inv(1, status="Helt betald")],  # paid
         [_inv(1, status="HELT BETALD ")],  # paid, odd casing/whitespace
         [_inv(1, due="2026-09-01T00:00:00")],  # already past due
+        [_inv(1, due="2026-09-15T00:00:00")],  # due today: the day-before moment is gone
         [_inv(1, due=None)],  # no due date at all
         [_inv(1, due="not-a-date")],
     ],

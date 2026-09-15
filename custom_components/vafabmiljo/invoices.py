@@ -71,18 +71,18 @@ class VafabMiljoInvoiceNotifier:
         self._reminder_time = DEFAULT_INVOICE_REMINDER_TIME
         self._unsub_timer = None
         self._unsub_listener = None
+        # False until the first-run baseline has been taken from a *valid*
+        # invoice snapshot (see _async_check). Persisted store => already seeded.
+        self._seeded = False
+        self._last_invoices: list[dict[str, Any]] = []
         self.pending_reminder_invoice_id: int | None = None
 
     # -- lifecycle -------------------------------------------------------------
 
     async def async_setup(self) -> None:
         stored = await self._store.async_load()
-        if stored is None:
-            # First run: everything already on the account is history, not
-            # news - announce only what shows up from here on.
-            self._announced = {inv["id"] for inv in self._invoices()}
-            await self._async_save()
-        else:
+        if stored is not None:
+            self._seeded = True
             self._announced = set(stored.get("announced", []))
             self._reminded = set(stored.get("reminded", []))
             if stored.get("reminder_time"):
@@ -120,10 +120,26 @@ class VafabMiljoInvoiceNotifier:
     def _handle_coordinator_update(self) -> None:
         self._hass.async_create_task(self._async_check())
 
-    def _invoices(self) -> list[dict[str, Any]]:
+    def _has_snapshot(self) -> bool:
+        """Whether the last refresh actually got an invoice list (a failed poll leaves invoices=None)."""
         data = self._coordinator.data
-        raw = (data.invoices or {}).get("data", []) if data is not None else []
-        return [inv["item"] for inv in raw if isinstance(inv.get("item"), dict) and inv["item"].get("id") is not None]
+        return data is not None and isinstance(data.invoices, dict) and isinstance(data.invoices.get("data"), list)
+
+    def _invoices(self) -> list[dict[str, Any]]:
+        """Invoice items from the latest valid snapshot.
+
+        A failed poll leaves the coordinator with invoices=None; the last good
+        list is kept so a reminder timer that fires during such a gap still
+        knows which invoice it was scheduled for.
+        """
+        if self._has_snapshot():
+            out: list[dict[str, Any]] = []
+            for inv in self._coordinator.data.invoices["data"]:
+                item = inv.get("item") if isinstance(inv, dict) else None
+                if isinstance(item, dict) and item.get("id") is not None:
+                    out.append(item)
+            self._last_invoices = out
+        return self._last_invoices
 
     async def _async_save(self) -> None:
         await self._store.async_save(
@@ -135,6 +151,22 @@ class VafabMiljoInvoiceNotifier:
         )
 
     async def _async_check(self) -> None:
+        if not self._has_snapshot():
+            # A failed /services/invoices poll (or no data yet): nothing to
+            # compare against. Leave any already-scheduled reminder timer in
+            # place rather than cancelling it and hoping the next poll lands
+            # before the due date.
+            return
+        if not self._seeded:
+            # First run: everything already on the account is history, not
+            # news - announce only what shows up from here on. Taken from the
+            # first *valid* snapshot, never from a failed poll (which would
+            # baseline an empty set and announce the whole history next time).
+            self._announced = {inv["id"] for inv in self._invoices()}
+            self._seeded = True
+            await self._async_save()
+            await self._async_schedule_reminder()
+            return
         new = [inv for inv in self._invoices() if inv["id"] not in self._announced]
         # The backend lists newest first; announce oldest-first so a burst of
         # several new invoices arrives in chronological order.
@@ -170,11 +202,17 @@ class VafabMiljoInvoiceNotifier:
         self.pending_reminder_invoice_id = None
 
     def _next_reminder_candidate(self, today: date) -> tuple[dict[str, Any], date] | None:
-        """The unpaid, not-yet-reminded invoice with the nearest due date still ahead."""
+        """The unpaid, not-yet-reminded invoice with the nearest due date still strictly ahead.
+
+        An invoice due *today* is excluded: its reminder moment (the day before)
+        has passed, and a "due tomorrow" reminder on the due date itself would
+        be wrong - the README promises catch-up only while the invoice is not
+        yet due.
+        """
         best: tuple[dict[str, Any], date] | None = None
         for inv in self._invoices():
             due = _parse_date(inv.get("invoiceExpirationDate"))
-            if due is None or inv["id"] in self._reminded or _is_paid(inv) or due < today:
+            if due is None or inv["id"] in self._reminded or _is_paid(inv) or due <= today:
                 continue
             if best is None or due < best[1]:
                 best = (inv, due)

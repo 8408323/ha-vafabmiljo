@@ -111,7 +111,9 @@ provides the building blocks and your own automations decide what to do with the
 
 Both events carry `invoice_id`, `amount`, `invoice_date`, `due_date` (`YYYY-MM-DD`),
 `days_until_due`, `payment_status`, `ocr_number`, `address`, `city` and `entry_id` in
-`trigger.event.data`.
+`trigger.event.data`. They are fired for every configured address, so with more than one
+property in HA, filter the trigger with `event_data:` on `address`/`city` (or `entry_id`) as
+the examples do.
 
 See [`examples/`](examples/) for a starter dashboard and automations covering all three,
 including a light-cue idea and per-person `input_boolean` toggles so a household can

@@ -88,10 +88,18 @@ automation:
   #
   # Event data: invoice_id, amount, invoice_date, due_date (YYYY-MM-DD),
   # days_until_due, payment_status, ocr_number, address, city, entry_id.
+  #
+  # Events are fired for every configured address/entry. With more than one
+  # property in HA, filter on `event_data` (address + city, or entry_id) so
+  # each automation only reacts to its own property - drop the event_data
+  # block entirely if you only have one.
   - alias: "VafabMiljö - notify about new invoice"
     trigger:
       - platform: event
         event_type: vafabmiljo_new_invoice
+        event_data:
+          address: "Exempelgatan 1"
+          city: "Exempelstad"
     action:
       - if:
           - condition: state
@@ -120,6 +128,9 @@ automation:
     trigger:
       - platform: event
         event_type: vafabmiljo_invoice_due_reminder
+        event_data:
+          address: "Exempelgatan 1"
+          city: "Exempelstad"
     action:
       - if:
           - condition: state
