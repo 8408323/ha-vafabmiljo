@@ -1281,7 +1281,30 @@ async def test_notifier_stops_working_once_its_store_is_removed():
 
     assert _events(hass, EVENT_NEW_INVOICE) == []
     assert 7 not in notifier._announced
+    assert hass.scheduled_timers == []  # the stale timer was dropped, none armed
+    assert notifier.pending_reminder_invoice_id is None
     assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
+async def test_a_refused_save_implies_the_notifier_is_defunct():
+    """The invariant every scheduling path relies on.
+
+    A save is refused only when entry removal deleted the store, which is
+    exactly what `_defunct` reports - so callers that do not inspect the save
+    result cannot schedule afterwards: `_async_schedule_reminder` cancels any
+    timer and returns on the same condition.
+    """
+    hass = HomeAssistant()
+    notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    assert notifier._defunct is False
+    assert await notifier._async_save() is True
+
+    await async_remove_invoice_store(hass, _entry())
+
+    assert await notifier._async_save() is False
+    assert notifier._defunct is True
+    await notifier._async_schedule_reminder()
+    assert hass.scheduled_timers == []
 
 
 async def test_untrusted_store_contributes_no_markers():
