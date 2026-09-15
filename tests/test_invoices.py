@@ -513,6 +513,28 @@ async def test_plant_id_is_captured_at_construction():
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["plant_id"] == "p1"
 
 
+async def test_failed_marker_save_is_retried_even_when_the_next_poll_fails():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(8)]})
+    original = notifier._store.async_save
+    calls = {"n": 0}
+
+    async def flaky(data):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("disk full")
+        await original(data)
+
+    notifier._store.async_save = flaky
+    with pytest.raises(OSError):
+        await notifier._async_check()
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=None)  # endpoint down
+    await notifier._async_check()
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [8]
+    assert len(_events(hass, EVENT_NEW_INVOICE)) == 1
+
+
 async def test_failed_reminder_time_save_rolls_back():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])

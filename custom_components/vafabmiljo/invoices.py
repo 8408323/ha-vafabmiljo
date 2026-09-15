@@ -268,10 +268,14 @@ class VafabMiljoInvoiceNotifier:
             return
         if not self._has_snapshot():
             # A failed /services/invoices poll (or no data yet): nothing to
-            # compare against. Leave any already-scheduled reminder timer in
-            # place rather than cancelling it and hoping the next poll lands
-            # before the due date - but if there is no timer at all (fresh
-            # restart), schedule from the persisted last-known list.
+            # compare against. Still retry a save that failed earlier (a
+            # delivered event must reach disk regardless of the endpoint),
+            # and leave any already-scheduled reminder timer in place rather
+            # than cancelling it and hoping the next poll lands before the due
+            # date - but if there is no timer at all (fresh restart), schedule
+            # from the persisted last-known list.
+            if self._dirty:
+                await self._async_save()
             if self._unsub_timer is None and self._last_invoices:
                 await self._async_schedule_reminder()
             return
