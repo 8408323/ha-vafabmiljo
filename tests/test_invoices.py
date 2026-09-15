@@ -452,7 +452,7 @@ async def test_store_with_string_or_junk_ids_is_normalised_on_load():
     assert notifier.reminded_count == 0
 
 
-async def test_failed_save_is_retried_on_the_next_check():
+async def test_failed_save_fires_nothing_and_is_retried_on_the_next_check():
     hass = HomeAssistant()
     notifier, coordinator = await _setup(hass, [])
     coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(8)]})
@@ -468,18 +468,21 @@ async def test_failed_save_is_retried_on_the_next_check():
     notifier._store.async_save = flaky
     with pytest.raises(OSError):
         await notifier._async_check()
-    assert (
-        "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
-        or hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == []
-    )
-    # Same data again: the event is not re-fired (already in memory) but the save is retried.
+    # The marker never reached disk, so the event must NOT have been delivered:
+    # a retry/reload would otherwise announce the same invoice a second time.
+    assert _events(hass, EVENT_NEW_INVOICE) == []
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == []
+    assert 8 not in notifier._announced
+
+    # Next check: persisted first, then delivered - exactly once.
     await notifier._async_check()
-    assert calls["n"] == 2
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [8]
     assert [e["invoice_id"] for e in _events(hass, EVENT_NEW_INVOICE)] == [8]
+    await notifier._async_check()
+    assert len(_events(hass, EVENT_NEW_INVOICE)) == 1
 
 
-async def test_failed_save_after_a_reminder_is_retried_even_with_unchanged_invoices():
+async def test_failed_save_of_a_reminder_marker_delivers_nothing_and_retries():
     dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)  # catch-up path
     hass = HomeAssistant()
     coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
@@ -489,18 +492,23 @@ async def test_failed_save_after_a_reminder_is_retried_even_with_unchanged_invoi
 
     async def flaky(data):
         calls["n"] += 1
-        if calls["n"] == 2:  # the save right after the reminder event
+        if calls["n"] == 2:  # the save guarding the reminder event
             raise OSError("disk full")
         await original(data)
 
     notifier._store.async_save = flaky
     with pytest.raises(OSError):
         await notifier.async_setup()
-    assert [e["invoice_id"] for e in _events(hass, EVENT_INVOICE_DUE_REMINDER)] == [1]
+    # Marker never reached disk -> the event must not have been delivered.
+    assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["reminded"] == []
-    # Nothing changed in the invoice list, yet the marker is retried.
+    assert 1 not in notifier._reminded
+
+    notifier._store.async_save = original
     await notifier._async_check()
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["reminded"] == [1]
+    assert [e["invoice_id"] for e in _events(hass, EVENT_INVOICE_DUE_REMINDER)] == [1]
+    await notifier._async_check()
     assert len(_events(hass, EVENT_INVOICE_DUE_REMINDER)) == 1
 
 
@@ -513,26 +521,18 @@ async def test_plant_id_is_captured_at_construction():
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["plant_id"] == "p1"
 
 
-async def test_failed_marker_save_is_retried_even_when_the_next_poll_fails():
+async def test_pending_marker_save_is_retried_even_when_the_next_poll_fails():
+    # A marker whose save failed is retried on the next check even while the
+    # invoice endpoint is down.
     hass = HomeAssistant()
-    notifier, coordinator = await _setup(hass, [])
-    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(8)]})
-    original = notifier._store.async_save
-    calls = {"n": 0}
-
-    async def flaky(data):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise OSError("disk full")
-        await original(data)
-
-    notifier._store.async_save = flaky
-    with pytest.raises(OSError):
-        await notifier._async_check()
+    notifier, coordinator = await _setup(hass, [_inv(8)])
+    notifier._reminded.add(8)
+    notifier._mark_dirty()
+    assert notifier._dirty is True
     coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices=None)  # endpoint down
     await notifier._async_check()
-    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [8]
-    assert len(_events(hass, EVENT_NEW_INVOICE)) == 1
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["reminded"] == [8]
+    assert notifier._dirty is False
 
 
 async def test_change_made_during_an_in_flight_save_stays_pending():
@@ -627,6 +627,52 @@ async def test_store_lock_is_shared_per_entry_and_remove_waits_for_it():
         assert not remove.done()  # blocked behind the in-flight holder
     await remove
     assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
+async def test_cached_invoice_ids_are_normalised_on_load():
+    hass = HomeAssistant()
+    hass.data["_stores"] = {
+        "vafabmiljo.test_entry.invoices": {
+            "seeded": True,
+            "plant_id": "p1",
+            "announced": [5],
+            "reminded": [5],
+            "reminder_time": "18:00:00",
+            "invoices": [
+                {"id": "5", "invoiceExpirationDate": "2026-09-30T00:00:00", "paymentStatus": "Obetald"},
+                {"id": None},
+                "junk",
+            ],
+        }
+    }
+    coordinator = _coordinator(None)  # endpoint down: the cache is all we have
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    await notifier.async_setup()
+    assert [inv["id"] for inv in notifier._last_invoices] == [5]
+    # "5" matched the reminded marker 5, so no duplicate reminder was armed.
+    assert hass.scheduled_timers == []
+    assert notifier.pending_reminder_invoice_id is None
+
+
+async def test_stale_timer_callback_does_not_orphan_the_replacement():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    stale_action, _ = hass.scheduled_timers[0]
+
+    # A new invoice with a nearer due date replaces the armed timer.
+    coordinator.data = VafabMiljoData(
+        pickups=[], authenticated=True, invoices={"data": [_inv(2, due="2026-09-20T00:00:00"), _inv(1)]}
+    )
+    await notifier._async_check()
+    assert notifier.pending_reminder_invoice_id == 2
+    current_handle = notifier._unsub_timer
+
+    # The old callback was already queued when its timer got cancelled.
+    await stale_action(datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc))
+
+    assert notifier._unsub_timer is current_handle  # replacement untouched
+    assert notifier.pending_reminder_invoice_id == 2
+    assert _events(hass, EVENT_INVOICE_DUE_REMINDER) == []
 
 
 async def test_unload_is_safe_to_call_twice():

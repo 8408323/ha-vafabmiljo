@@ -19,6 +19,7 @@ rather than tied to the 30-minute poll cadence.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -92,6 +93,24 @@ def _load_ids(values: Any) -> set[int]:
     return {i for i in (_as_invoice_id(v) for v in values) if i is not None}
 
 
+def _load_invoices(values: Any) -> list[dict[str, Any]]:
+    """Cached invoice rows from storage, ids normalised exactly like the decoder's.
+
+    Anything else would let a stored "5" miss a marker holding 5, and mixing
+    types in the marker sets makes their sorted() persistence raise.
+    """
+    if not isinstance(values, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for inv in values:
+        if not isinstance(inv, dict):
+            continue
+        invoice_id = _as_invoice_id(inv.get("id"))
+        if invoice_id is not None:
+            out.append({**inv, "id": invoice_id})
+    return out
+
+
 def _is_paid(invoice: dict[str, Any]) -> bool:
     return str(invoice.get("paymentStatus") or "").strip().lower() in PAID_STATUSES
 
@@ -120,6 +139,10 @@ class VafabMiljoInvoiceNotifier:
         self._reminded: set[int] = set()
         self._reminder_time = time.fromisoformat(DEFAULT_INVOICE_REMINDER_TIME)
         self._unsub_timer = None
+        # Bumped whenever a timer is armed or dropped; a callback that was
+        # already queued when its timer got cancelled carries a stale token
+        # and must not touch the replacement's state.
+        self._timer_token = 0
         self._unsub_listener = None
         # False until the first-run baseline has been taken from a *valid*
         # invoice snapshot (see _async_check). Persisted store => already seeded.
@@ -161,7 +184,7 @@ class VafabMiljoInvoiceNotifier:
             self._reminded = _load_ids(stored.get("reminded"))
             # Last decoded invoice list, so a reminder can still be scheduled
             # (or caught up) after a restart whose first poll fails.
-            self._last_invoices = [inv for inv in stored.get("invoices", []) if isinstance(inv, dict)]
+            self._last_invoices = _load_invoices(stored.get("invoices"))
             self._stored_invoices = list(self._last_invoices)
             if stored.get("reminder_time"):
                 self._reminder_time = time.fromisoformat(stored["reminder_time"])
@@ -303,14 +326,28 @@ class VafabMiljoInvoiceNotifier:
             await self._async_schedule_reminder()
             return
         new = [inv for inv in self._invoices() if inv["id"] not in self._announced]
-        # The backend lists newest first; announce oldest-first so a burst of
-        # several new invoices arrives in chronological order.
-        for inv in reversed(new):
-            self._hass.bus.async_fire(EVENT_NEW_INVOICE, self._event_data(inv))
-            self._announced.add(inv["id"])
+        if new:
+            # Persist the markers BEFORE firing. An event that reached the bus
+            # while its save failed would be announced again by the retry (a
+            # failure during setup tears this notifier down and HA retries),
+            # which is exactly the duplicate this module exists to prevent.
+            # Nothing awaits between the successful save and the synchronous
+            # fire, so the reverse window is not a practical concern.
+            pending = {inv["id"] for inv in new}
+            self._announced |= pending
             self._mark_dirty()
-            _LOGGER.debug("Announced new invoice %s", inv["id"])
-        if self._dirty or self._last_invoices != self._stored_invoices:
+            try:
+                await self._async_save()
+            except Exception:
+                # Not delivered and not recorded: let the next check try again.
+                self._announced -= pending
+                raise
+            # The backend lists newest first; announce oldest-first so a burst
+            # of several new invoices arrives in chronological order.
+            for inv in reversed(new):
+                self._hass.bus.async_fire(EVENT_NEW_INVOICE, self._event_data(inv))
+                _LOGGER.debug("Announced new invoice %s", inv["id"])
+        elif self._dirty or self._last_invoices != self._stored_invoices:
             await self._async_save()
         await self._async_schedule_reminder()
 
@@ -335,6 +372,7 @@ class VafabMiljoInvoiceNotifier:
         if self._unsub_timer is not None:
             self._unsub_timer()
             self._unsub_timer = None
+        self._timer_token += 1
         self.pending_reminder_invoice_id = None
 
     def _next_reminder_candidate(self, today: date) -> tuple[dict[str, Any], date] | None:
@@ -370,17 +408,29 @@ class VafabMiljoInvoiceNotifier:
             # Reminder moment already passed (HA was down, or the reminder time
             # was moved earlier) but the invoice is still not due - send it now
             # rather than silently skipping it, then look for the next one.
-            self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(inv))
             self._reminded.add(inv["id"])
             self._mark_dirty()
+            try:
+                await self._async_save()
+            except Exception:
+                self._reminded.discard(inv["id"])
+                raise
+            self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(inv))
             _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
-            await self._async_save()
             await self._async_schedule_reminder()
             return
+        self._timer_token += 1
         self.pending_reminder_invoice_id = inv["id"]
-        self._unsub_timer = async_track_point_in_time(self._hass, self._async_on_timer, remind_at)
+        self._unsub_timer = async_track_point_in_time(
+            self._hass, functools.partial(self._async_on_timer, self._timer_token), remind_at
+        )
 
-    async def _async_on_timer(self, _now: datetime) -> None:
+    async def _async_on_timer(self, token: int, _now: datetime) -> None:
+        if token != self._timer_token:
+            # Stale: this timer was cancelled and replaced after its callback
+            # had already been queued. Clearing the handle here would orphan
+            # the replacement timer.
+            return
         self._unsub_timer = None
         self.pending_reminder_invoice_id = None
         await self._async_schedule_reminder()
