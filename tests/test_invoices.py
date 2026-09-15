@@ -479,6 +479,40 @@ async def test_failed_save_is_retried_on_the_next_check():
     assert [e["invoice_id"] for e in _events(hass, EVENT_NEW_INVOICE)] == [8]
 
 
+async def test_failed_save_after_a_reminder_is_retried_even_with_unchanged_invoices():
+    dt_util.NOW_OVERRIDE = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)  # catch-up path
+    hass = HomeAssistant()
+    coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
+    notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    original = notifier._store.async_save
+    calls = {"n": 0}
+
+    async def flaky(data):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the save right after the reminder event
+            raise OSError("disk full")
+        await original(data)
+
+    notifier._store.async_save = flaky
+    with pytest.raises(OSError):
+        await notifier.async_setup()
+    assert [e["invoice_id"] for e in _events(hass, EVENT_INVOICE_DUE_REMINDER)] == [1]
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["reminded"] == []
+    # Nothing changed in the invoice list, yet the marker is retried.
+    await notifier._async_check()
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["reminded"] == [1]
+    assert len(_events(hass, EVENT_INVOICE_DUE_REMINDER)) == 1
+
+
+async def test_plant_id_is_captured_at_construction():
+    hass = HomeAssistant()
+    entry = _entry()
+    notifier = VafabMiljoInvoiceNotifier(hass, entry, _coordinator([_inv(1)]))
+    entry.data["plant_id"] = "p-changed-by-reconfigure"  # mutated before this instance saves
+    await notifier.async_setup()
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["plant_id"] == "p1"
+
+
 async def test_failed_reminder_time_save_rolls_back():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])

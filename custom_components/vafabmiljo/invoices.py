@@ -105,6 +105,13 @@ class VafabMiljoInvoiceNotifier:
         self._coordinator = coordinator
         self._store: Store = Store(hass, INVOICE_STORAGE_VERSION, _store_key(entry))
         self._lock = _store_lock(hass, _store_key(entry))
+        # Captured now: a reconfigure flow mutates entry.data before reloading,
+        # and a save of *this* instance must keep labelling its state with the
+        # property it actually belongs to.
+        self._plant_id = entry.data.get(CONF_PLANT_ID)
+        # True whenever announced/reminded/seeded changed since the last
+        # successful save; a failed save must be retried on the next check.
+        self._dirty = False
         self._announced: set[int] = set()
         self._reminded: set[int] = set()
         self._reminder_time = time.fromisoformat(DEFAULT_INVOICE_REMINDER_TIME)
@@ -129,7 +136,7 @@ class VafabMiljoInvoiceNotifier:
     async def async_setup(self) -> None:
         async with self._lock:
             stored = await self._store.async_load()
-        if stored is not None and stored.get("plant_id") not in (None, self._entry.data.get(CONF_PLANT_ID)):
+        if stored is not None and stored.get("plant_id") not in (None, self._plant_id):
             # The entry was reconfigured to another address (same entry_id):
             # the old property's announced/reminded/cached state must not
             # carry over. Keep only the user's reminder time.
@@ -237,7 +244,7 @@ class VafabMiljoInvoiceNotifier:
         async with self._lock:
             await self._store.async_save(
                 {
-                    "plant_id": self._entry.data.get(CONF_PLANT_ID),
+                    "plant_id": self._plant_id,
                     "seeded": self._seeded,
                     "announced": sorted(self._announced),
                     "reminded": sorted(self._reminded),
@@ -248,6 +255,7 @@ class VafabMiljoInvoiceNotifier:
         # Only after the write landed - a failed save must look unsaved so the
         # next check retries it.
         self._stored_invoices = snapshot
+        self._dirty = False
 
     async def _async_check(self) -> None:
         if self._unloaded:
@@ -268,6 +276,7 @@ class VafabMiljoInvoiceNotifier:
             # baseline an empty set and announce the whole history next time).
             self._announced = {inv["id"] for inv in self._invoices()}
             self._seeded = True
+            self._dirty = True
             await self._async_save()
             await self._async_schedule_reminder()
             return
@@ -277,8 +286,9 @@ class VafabMiljoInvoiceNotifier:
         for inv in reversed(new):
             self._hass.bus.async_fire(EVENT_NEW_INVOICE, self._event_data(inv))
             self._announced.add(inv["id"])
+            self._dirty = True
             _LOGGER.debug("Announced new invoice %s", inv["id"])
-        if new or self._last_invoices != self._stored_invoices:
+        if self._dirty or self._last_invoices != self._stored_invoices:
             await self._async_save()
         await self._async_schedule_reminder()
 
@@ -340,6 +350,7 @@ class VafabMiljoInvoiceNotifier:
             # rather than silently skipping it, then look for the next one.
             self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(inv))
             self._reminded.add(inv["id"])
+            self._dirty = True
             _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
             await self._async_save()
             await self._async_schedule_reminder()
