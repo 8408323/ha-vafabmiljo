@@ -194,10 +194,15 @@ def test_as_invoice_id_rejects_malformed_values_without_raising():
 
     assert _as_invoice_id(5) == 5
     assert _as_invoice_id(" 5 ") == 5
-    # str.isdigit() is true for these but int() refuses the first one.
+    # str.isdigit() is true for both, int() refuses the first and silently
+    # normalises the second; plain ASCII decimals only, so both are rejected.
     assert _as_invoice_id("\u00b2") is None
-    assert _as_invoice_id("\uff15") == 5
+    assert _as_invoice_id("\uff15") is None
     assert _as_invoice_id(True) is None
     assert _as_invoice_id(None) is None
     assert _as_invoice_id([]) is None
     assert _as_invoice_id("12a") is None
+    # int() would read these as 10; a junk row must not shadow the real id 10.
+    assert _as_invoice_id("1_0") is None
+    assert _as_invoice_id("\uff11\uff10") is None
+    assert _as_invoice_id("-5") == -5

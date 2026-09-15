@@ -872,7 +872,14 @@ async def test_only_a_real_true_counts_as_seeded(flag):
     assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["seeded"] is True
 
 
-@pytest.mark.parametrize("stored", [{"seeded": True}, {"seeded": True, "announced": "x", "reminded": []}])
+@pytest.mark.parametrize(
+    "stored",
+    [
+        {"seeded": True},
+        {"seeded": True, "announced": "x", "reminded": []},
+        {"seeded": True, "announced": [], "reminded": [], "invoices": "junk"},
+    ],
+)
 async def test_truncated_store_is_not_trusted_as_seeded(stored):
     hass = HomeAssistant()
     hass.data["_stores"] = {"vafabmiljo.test_entry.invoices": stored}

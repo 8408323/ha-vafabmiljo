@@ -218,6 +218,7 @@ class VafabMiljoInvoiceNotifier:
                 stored.get("seeded") is True
                 and isinstance(stored.get("announced"), list)
                 and isinstance(stored.get("reminded"), list)
+                and isinstance(stored.get("invoices"), list)
             )
             # Normalise like the decoder does, so a store written with string
             # ids can never mismatch the int ids of a fresh snapshot.

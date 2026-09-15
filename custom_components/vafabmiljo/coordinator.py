@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -19,6 +20,9 @@ from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
+_DECIMAL_RE = re.compile(r"[+-]?[0-9]+")
+
+
 def _as_invoice_id(value: Any) -> int | None:
     """Backend invoice ids are ints; accept numeric strings, reject everything else (incl. bools).
 
@@ -31,10 +35,12 @@ def _as_invoice_id(value: Any) -> int | None:
     if isinstance(value, int):
         return value
     if isinstance(value, str):
-        try:
-            return int(value.strip())
-        except ValueError:
-            return None
+        # Plain ASCII decimals only. int() is too permissive on its own: it
+        # reads "1_0" as 10 (a junk row could then shadow the real invoice 10)
+        # and accepts full-width digits, while str.isdigit() is true for
+        # characters int() refuses outright.
+        if _DECIMAL_RE.fullmatch(value.strip()):
+            return int(value)
     return None
 
 

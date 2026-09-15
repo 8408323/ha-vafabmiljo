@@ -103,7 +103,9 @@ automation:
   # invoices, or catch-up reminders after downtime); the default `single`
   # mode would drop the later ones while the first notification is running.
   # `max` is spelled out because the default queue bound is 10, which would
-  # silently discard an eleventh event in the same burst.
+  # silently discard an eleventh event in the same burst. Queued mode always
+  # has a finite bound, so pick one above any burst you expect: with 25, a
+  # catch-up of more than 25 invoices at once would drop the surplus runs.
   - alias: "VafabMiljö - notify about new invoice"
     mode: queued
     max: 25
