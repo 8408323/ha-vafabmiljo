@@ -535,6 +535,41 @@ async def test_failed_marker_save_is_retried_even_when_the_next_poll_fails():
     assert len(_events(hass, EVENT_NEW_INVOICE)) == 1
 
 
+async def test_change_made_during_an_in_flight_save_stays_pending():
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(1)]})
+    original = notifier._store.async_save
+    gate = asyncio.Event()
+
+    async def slow(data):
+        await gate.wait()
+        await original(data)
+
+    notifier._store.async_save = slow
+    first = asyncio.ensure_future(notifier._async_check())  # announces 1, blocks in save
+    await asyncio.sleep(0)
+    notifier._announced.add(2)
+    notifier._mark_dirty()  # a second change lands while the first save is in flight
+    gate.set()
+    await first
+    assert notifier._dirty is True  # the first save must not have cleared it
+    notifier._store.async_save = original
+    await notifier._async_check()
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [1, 2]
+    assert notifier._dirty is False
+
+
+async def test_event_payload_uses_address_captured_at_construction():
+    hass = HomeAssistant()
+    entry = _entry()
+    notifier = VafabMiljoInvoiceNotifier(hass, entry, _coordinator([]))
+    entry.data["address"] = "Nygatan 2"
+    assert notifier._event_data({"id": 1})["address"] == "Testgatan 1"
+
+
 async def test_failed_reminder_time_save_rolls_back():
     hass = HomeAssistant()
     notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])

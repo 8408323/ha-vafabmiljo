@@ -99,19 +99,21 @@ class VafabMiljoInvoiceSensor(CoordinatorEntity[VafabMiljoCoordinator], SensorEn
 
     @property
     def _invoices(self) -> list[dict[str, Any]]:
-        return (self.coordinator.data.invoices or {}).get("data", [])
+        # Same validated flattening as the notifier and diagnostics, so a
+        # malformed poll can't raise here and all three views agree.
+        return self.coordinator.data.invoice_items
 
     @property
     def native_value(self) -> float | None:
         invoices = self._invoices
-        return invoices[0]["item"]["amount"] if invoices else None
+        return invoices[0].get("amount") if invoices else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         invoices = self._invoices
         if not invoices:
             return {}
-        latest = invoices[0]["item"]
+        latest = invoices[0]
         return {
             "invoice_date": latest.get("invoiceDate"),
             "due_date": latest.get("invoiceExpirationDate"),
@@ -122,12 +124,12 @@ class VafabMiljoInvoiceSensor(CoordinatorEntity[VafabMiljoCoordinator], SensorEn
             # invoice_id for the download_invoice service action.
             "invoices": [
                 {
-                    "id": inv["item"].get("id"),
-                    "amount": inv["item"].get("amount"),
-                    "invoice_date": inv["item"].get("invoiceDate"),
-                    "due_date": inv["item"].get("invoiceExpirationDate"),
-                    "payment_status": inv["item"].get("paymentStatus"),
-                    "ocr_number": inv["item"].get("ocrNumber"),
+                    "id": inv.get("id"),
+                    "amount": inv.get("amount"),
+                    "invoice_date": inv.get("invoiceDate"),
+                    "due_date": inv.get("invoiceExpirationDate"),
+                    "payment_status": inv.get("paymentStatus"),
+                    "ocr_number": inv.get("ocrNumber"),
                 }
                 for inv in invoices
             ],

@@ -109,9 +109,13 @@ class VafabMiljoInvoiceNotifier:
         # and a save of *this* instance must keep labelling its state with the
         # property it actually belongs to.
         self._plant_id = entry.data.get(CONF_PLANT_ID)
-        # True whenever announced/reminded/seeded changed since the last
-        # successful save; a failed save must be retried on the next check.
-        self._dirty = False
+        self._address = entry.data.get(CONF_ADDRESS)
+        self._city = entry.data.get(CONF_CITY)
+        # Generation counters: every marker change bumps _gen; a save records
+        # the generation it wrote. A change made *while* a save is awaiting
+        # therefore stays pending instead of being cleared by that save.
+        self._gen = 0
+        self._saved_gen = 0
         self._announced: set[int] = set()
         self._reminded: set[int] = set()
         self._reminder_time = time.fromisoformat(DEFAULT_INVOICE_REMINDER_TIME)
@@ -145,7 +149,7 @@ class VafabMiljoInvoiceNotifier:
             # Persist the sanitized state right away rather than only with the
             # first valid snapshot - the old property's cached invoices (OCR
             # numbers included) must not linger on disk if that never comes.
-            self._dirty = True
+            self._mark_dirty()
         if stored is not None:
             # An explicit flag, not the store's mere existence: changing the
             # reminder time also writes the store, possibly before the first
@@ -201,6 +205,13 @@ class VafabMiljoInvoiceNotifier:
         return self._reminder_time
 
     @property
+    def _dirty(self) -> bool:
+        return self._gen != self._saved_gen
+
+    def _mark_dirty(self) -> None:
+        self._gen += 1
+
+    @property
     def announced_count(self) -> int:
         return len(self._announced)
 
@@ -247,6 +258,7 @@ class VafabMiljoInvoiceNotifier:
 
     async def _async_save(self) -> None:
         snapshot = list(self._last_invoices)
+        gen = self._gen
         async with self._lock:
             await self._store.async_save(
                 {
@@ -261,7 +273,7 @@ class VafabMiljoInvoiceNotifier:
         # Only after the write landed - a failed save must look unsaved so the
         # next check retries it.
         self._stored_invoices = snapshot
-        self._dirty = False
+        self._saved_gen = max(self._saved_gen, gen)
 
     async def _async_check(self) -> None:
         if self._unloaded:
@@ -286,7 +298,7 @@ class VafabMiljoInvoiceNotifier:
             # baseline an empty set and announce the whole history next time).
             self._announced = {inv["id"] for inv in self._invoices()}
             self._seeded = True
-            self._dirty = True
+            self._mark_dirty()
             await self._async_save()
             await self._async_schedule_reminder()
             return
@@ -296,7 +308,7 @@ class VafabMiljoInvoiceNotifier:
         for inv in reversed(new):
             self._hass.bus.async_fire(EVENT_NEW_INVOICE, self._event_data(inv))
             self._announced.add(inv["id"])
-            self._dirty = True
+            self._mark_dirty()
             _LOGGER.debug("Announced new invoice %s", inv["id"])
         if self._dirty or self._last_invoices != self._stored_invoices:
             await self._async_save()
@@ -308,8 +320,8 @@ class VafabMiljoInvoiceNotifier:
         today = dt_util.now().date()
         return {
             "entry_id": self._entry.entry_id,
-            "address": self._entry.data.get(CONF_ADDRESS),
-            "city": self._entry.data.get(CONF_CITY),
+            "address": self._address,
+            "city": self._city,
             "invoice_id": inv["id"],
             "amount": inv.get("amount"),
             "invoice_date": invoiced.isoformat() if invoiced else None,
@@ -360,7 +372,7 @@ class VafabMiljoInvoiceNotifier:
             # rather than silently skipping it, then look for the next one.
             self._hass.bus.async_fire(EVENT_INVOICE_DUE_REMINDER, self._event_data(inv))
             self._reminded.add(inv["id"])
-            self._dirty = True
+            self._mark_dirty()
             _LOGGER.debug("Sent due-date reminder for invoice %s", inv["id"])
             await self._async_save()
             await self._async_schedule_reminder()
