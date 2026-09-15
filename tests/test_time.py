@@ -61,11 +61,12 @@ async def test_setup_adds_invoice_reminder_time_when_notifier_present():
 
 
 async def test_invoice_reminder_time_delegates_to_notifier():
-    notifier = Mock(reminder_time=None)
+    notifier = Mock(reminder_time=time(18, 0))
     notifier.async_set_reminder_time = AsyncMock()
     entity = VafabMiljoInvoiceReminderTimeEntity(_entry(), notifier)
     entity.async_write_ha_state = Mock()
-    assert entity.native_value == time(18, 0)  # default while the notifier has none
+    assert entity.native_value == time(18, 0)
+    assert entity._attr_should_poll is False
 
     await entity.async_set_value(time(9, 15))
 

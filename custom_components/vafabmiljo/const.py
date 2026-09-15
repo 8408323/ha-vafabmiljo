@@ -76,3 +76,5 @@ EVENT_INVOICE_DUE_REMINDER = f"{DOMAIN}_invoice_due_reminder"
 # Invoice payment statuses (as the backend spells them) that mean "nothing to pay".
 PAID_STATUSES = {"helt betald"}
 INVOICE_STORAGE_VERSION = 1
+# Local default for the "Invoice reminder time" entity (day-before-due reminder).
+DEFAULT_INVOICE_REMINDER_TIME = "18:00"

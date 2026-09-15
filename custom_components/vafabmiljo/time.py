@@ -27,7 +27,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import CONF_ADDRESS, CONF_CITY, CONF_PLANT_ID, DOMAIN, REMINDER_TIME_FIELD
 from .coordinator import VafabMiljoCoordinator
-from .invoices import DEFAULT_INVOICE_REMINDER_TIME, VafabMiljoInvoiceNotifier
+from .invoices import VafabMiljoInvoiceNotifier
 
 DEFAULT_REMINDER_TIME = time(19, 0)  # matches the backend's own default for a new device
 DEFAULT_NOTIFY_TIME = time(18, 0)
@@ -57,6 +57,7 @@ class VafabMiljoReminderTimeEntity(TimeEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "reminder_time"
     _attr_assumed_state = True
+    _attr_should_poll = False
 
     def __init__(self, coordinator: VafabMiljoCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
@@ -84,6 +85,7 @@ class VafabMiljoNotifyTimeEntity(TimeEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "notify_time"
     _attr_assumed_state = True
+    _attr_should_poll = False
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._attr_unique_id = f"{entry.data[CONF_PLANT_ID]}_notify_time"
@@ -110,6 +112,7 @@ class VafabMiljoInvoiceReminderTimeEntity(TimeEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "invoice_reminder_time"
+    _attr_should_poll = False  # only changes through its own set_value
 
     def __init__(self, entry: ConfigEntry, notifier: VafabMiljoInvoiceNotifier) -> None:
         self._notifier = notifier
@@ -118,7 +121,7 @@ class VafabMiljoInvoiceReminderTimeEntity(TimeEntity):
 
     @property
     def native_value(self) -> time:
-        return self._notifier.reminder_time or DEFAULT_INVOICE_REMINDER_TIME
+        return self._notifier.reminder_time
 
     async def async_set_value(self, value: time) -> None:
         await self._notifier.async_set_reminder_time(value)

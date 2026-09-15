@@ -7,11 +7,11 @@ from unittest.mock import Mock
 
 import pytest
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.util import dt as dt_util
 from vafabmiljo.const import EVENT_INVOICE_DUE_REMINDER, EVENT_NEW_INVOICE
 from vafabmiljo.coordinator import VafabMiljoData
-from vafabmiljo.invoices import DEFAULT_INVOICE_REMINDER_TIME, VafabMiljoInvoiceNotifier, _parse_date
+from vafabmiljo.invoices import VafabMiljoInvoiceNotifier, _parse_date, async_remove_invoice_store
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
 
@@ -190,7 +190,7 @@ async def test_reminder_is_scheduled_the_day_before_due_at_reminder_time():
     assert len(hass.scheduled_timers) == 1
     assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 0, tzinfo=timezone.utc)
     assert notifier.pending_reminder_invoice_id == 1
-    assert notifier.reminder_time == DEFAULT_INVOICE_REMINDER_TIME
+    assert notifier.reminder_time == time(18, 0)
 
     # Timer fires: the reminder goes out once and is persisted.
     await _fire_timer(hass)
@@ -253,7 +253,7 @@ async def test_setting_reminder_time_persists_and_reschedules():
     notifier, coordinator = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
     await notifier.async_set_reminder_time(time(7, 30))
     assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 7, 30, tzinfo=timezone.utc)
-    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["reminder_time"] == "07:30"
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["reminder_time"] == "07:30:00"
 
     # A restart picks the stored time back up.
     notifier.async_unload()
@@ -267,7 +267,7 @@ async def test_first_check_waits_for_ha_start_on_cold_boot():
     import asyncio
 
     hass = HomeAssistant()
-    hass.is_running = False
+    hass.state = CoreState.starting
     coordinator = _coordinator([_inv(1, due="2026-09-30T00:00:00")])
     notifier = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
     await notifier.async_setup()
@@ -277,7 +277,13 @@ async def test_first_check_waits_for_ha_start_on_cold_boot():
     assert hass.scheduled_timers == []
     assert len(hass.started_callbacks) == 1
 
-    hass.is_running = True
+    # A coordinator refresh completing mid-boot must not check either.
+    coordinator.listeners[0]()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert notifier.announced_count == 0
+
+    hass.state = CoreState.running
     hass.started_callbacks[0](hass)
     await asyncio.sleep(0)
     await asyncio.sleep(0)
@@ -287,32 +293,102 @@ async def test_first_check_waits_for_ha_start_on_cold_boot():
 
 async def test_unload_before_ha_start_cancels_the_start_hook():
     hass = HomeAssistant()
-    hass.is_running = False
+    hass.state = CoreState.starting
     notifier = VafabMiljoInvoiceNotifier(hass, _entry(), _coordinator([_inv(1)]))
     await notifier.async_setup()
     notifier.async_unload()
     assert hass.started_callbacks == []
 
 
-async def test_unload_cancels_in_flight_checks_and_blocks_late_scheduling():
+async def test_unload_blocks_late_checks_and_scheduling_but_never_loses_a_delivered_event():
     import asyncio
 
     hass = HomeAssistant()
     notifier, coordinator = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
     coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(2), _inv(1)]})
     coordinator.listeners[0]()  # spawns a check task that has not run yet
-    assert len(notifier._tasks) == 1
     notifier.async_unload()
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert notifier._tasks == set()
-    assert _events(hass, EVENT_NEW_INVOICE) == []  # cancelled before it could announce
+    # The late task saw the unloaded flag before doing anything.
+    assert _events(hass, EVENT_NEW_INVOICE) == []
     assert hass.scheduled_timers == []
 
     # A stale direct call after unload must not schedule anything either.
     await notifier._async_check()
     await notifier._async_schedule_reminder()
     assert hass.scheduled_timers == []
+
+
+async def test_event_fired_before_unload_is_still_persisted():
+    # A check that has already fired must complete its save even if unload
+    # happens while the save is in flight - otherwise the replacement notifier
+    # would announce the same invoice again.
+    import asyncio
+
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [])
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(7)]})
+    saved = asyncio.Event()
+    original_save = notifier._store.async_save
+
+    async def slow_save(data):
+        notifier.async_unload()  # unload lands mid-save
+        await original_save(data)
+        saved.set()
+
+    notifier._store.async_save = slow_save
+    await notifier._async_check()
+    assert saved.is_set()
+    assert [e["invoice_id"] for e in _events(hass, EVENT_NEW_INVOICE)] == [7]
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["announced"] == [7]
+
+
+async def test_remove_invoice_store_deletes_persisted_state():
+    hass = HomeAssistant()
+    await _setup(hass, [_inv(1)])
+    assert "vafabmiljo.test_entry.invoices" in hass.data["_stores"]
+    await async_remove_invoice_store(hass, _entry())
+    assert "vafabmiljo.test_entry.invoices" not in hass.data["_stores"]
+
+
+async def test_reminder_time_with_seconds_is_scheduled_and_persisted_exactly():
+    hass = HomeAssistant()
+    notifier, _ = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    await notifier.async_set_reminder_time(time(18, 30, 45))
+    assert hass.scheduled_timers[0][1] == datetime(2026, 9, 29, 18, 30, 45, tzinfo=timezone.utc)
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["reminder_time"] == "18:30:45"
+
+
+async def test_reminder_time_saved_before_seeding_does_not_count_as_a_baseline():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, None)  # first poll failed: not seeded
+    await notifier.async_set_reminder_time(time(7, 0))  # writes the store anyway
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["seeded"] is False
+
+    # "Restart" with the store present but unseeded, then the first valid snapshot arrives.
+    notifier.async_unload()
+    fresh = VafabMiljoInvoiceNotifier(hass, _entry(), coordinator)
+    await fresh.async_setup()
+    assert fresh.reminder_time == time(7, 0)
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [_inv(2), _inv(1)]})
+    await fresh._async_check()
+    assert _events(hass, EVENT_NEW_INVOICE) == []  # history was baselined, not announced
+    assert hass.data["_stores"]["vafabmiljo.test_entry.invoices"]["seeded"] is True
+
+
+async def test_all_junk_rows_do_not_count_as_a_snapshot():
+    hass = HomeAssistant()
+    notifier, coordinator = await _setup(hass, [_inv(1, due="2026-09-30T00:00:00")])
+    assert len(hass.scheduled_timers) == 1
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": [None, {"item": "junk"}]})
+    await notifier._async_check()
+    assert len(hass.scheduled_timers) == 1  # cached good list kept, timer untouched
+    # ...whereas a genuinely empty list is a real (empty) snapshot on first run
+    hass2 = HomeAssistant()
+    n2, _ = await _setup(hass2, [])
+    assert hass2.data["_stores"]["vafabmiljo.test_entry.invoices"]["seeded"] is True
+    assert n2.announced_count == 0
 
 
 async def test_unload_is_safe_to_call_twice():

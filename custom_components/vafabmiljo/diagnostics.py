@@ -35,7 +35,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         "entry_data": async_redact_data(dict(entry.data), TO_REDACT),
         "authenticated": data.authenticated,
         "bin_types": bin_types,
-        "invoice_count": len((data.invoices or {}).get("data", [])),
+        "invoice_count": len(data.invoice_items),
         "sanitation_contract_count": len((data.sanitation or {}).get("contracts", [])),
         "invoice_notifier": _notifier_diagnostics(coordinator),
     }
@@ -48,6 +48,7 @@ def _notifier_diagnostics(coordinator: VafabMiljoCoordinator) -> dict[str, Any] 
     return {
         "announced_count": notifier.announced_count,
         "reminded_count": notifier.reminded_count,
-        "reminder_time": notifier.reminder_time.strftime("%H:%M"),
-        "pending_reminder_invoice_id": notifier.pending_reminder_invoice_id,
+        "reminder_time": notifier.reminder_time.isoformat(),
+        # A boolean, not the invoice id: diagnostics are meant to be shareable.
+        "has_pending_reminder": notifier.pending_reminder_invoice_id is not None,
     }

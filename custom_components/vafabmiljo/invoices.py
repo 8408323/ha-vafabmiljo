@@ -18,13 +18,12 @@ rather than tied to the 30-minute poll cadence.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
@@ -33,6 +32,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_ADDRESS,
     CONF_CITY,
+    DEFAULT_INVOICE_REMINDER_TIME,
     DOMAIN,
     EVENT_INVOICE_DUE_REMINDER,
     EVENT_NEW_INVOICE,
@@ -43,7 +43,14 @@ from .coordinator import VafabMiljoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_INVOICE_REMINDER_TIME = time(18, 0)
+
+def _store_key(entry: ConfigEntry) -> str:
+    return f"{DOMAIN}.{entry.entry_id}.invoices"
+
+
+async def async_remove_invoice_store(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the per-entry persisted state when the entry itself is removed."""
+    await Store(hass, INVOICE_STORAGE_VERSION, _store_key(entry)).async_remove()
 
 
 def _parse_date(value: Any) -> date | None:
@@ -67,20 +74,21 @@ class VafabMiljoInvoiceNotifier:
         self._hass = hass
         self._entry = entry
         self._coordinator = coordinator
-        self._store: Store = Store(hass, INVOICE_STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.invoices")
+        self._store: Store = Store(hass, INVOICE_STORAGE_VERSION, _store_key(entry))
         self._announced: set[int] = set()
         self._reminded: set[int] = set()
-        self._reminder_time = DEFAULT_INVOICE_REMINDER_TIME
+        self._reminder_time = time.fromisoformat(DEFAULT_INVOICE_REMINDER_TIME)
         self._unsub_timer = None
         self._unsub_listener = None
         # False until the first-run baseline has been taken from a *valid*
         # invoice snapshot (see _async_check). Persisted store => already seeded.
         self._seeded = False
         self._last_invoices: list[dict[str, Any]] = []
-        # In-flight _async_check tasks spawned from the coordinator listener,
-        # so an unload/reload can cancel them instead of letting a stale
-        # instance schedule timers (and double-fire) next to its replacement.
-        self._tasks: set[asyncio.Task] = set()
+        # Set on unload. In-flight checks are deliberately *not* cancelled: the
+        # only suspension point in a check sits between firing an event and
+        # persisting it, and cancelling there would forget a delivered event
+        # (= the double notification this module exists to prevent). Instead a
+        # stale task finishes its save and is then refused any new scheduling.
         self._unloaded = False
         self._unsub_started = None
         self.pending_reminder_invoice_id: int | None = None
@@ -90,7 +98,10 @@ class VafabMiljoInvoiceNotifier:
     async def async_setup(self) -> None:
         stored = await self._store.async_load()
         if stored is not None:
-            self._seeded = True
+            # An explicit flag, not the store's mere existence: changing the
+            # reminder time also writes the store, possibly before the first
+            # valid invoice snapshot ever arrived.
+            self._seeded = bool(stored.get("seeded", False))
             self._announced = set(stored.get("announced", []))
             self._reminded = set(stored.get("reminded", []))
             if stored.get("reminder_time"):
@@ -98,17 +109,24 @@ class VafabMiljoInvoiceNotifier:
         self._unsub_listener = self._coordinator.async_add_listener(self._handle_coordinator_update)
         # During a cold HA start this entry may be set up before the automation
         # integration has its event listeners in place; an event fired now would
-        # be persisted as delivered yet reach nobody. Wait for HA to be fully
-        # started before the first check (a later reload runs it immediately).
-        if self._hass.is_running:
+        # be persisted as delivered yet reach nobody. Nothing is checked - not
+        # the first pass, not a coordinator refresh - until HA is fully running
+        # (CoreState.running, the same state automations wait for; note
+        # hass.is_running is already True in CoreState.starting). A reload of
+        # an already-running HA checks immediately.
+        if self._ha_running:
             await self._async_check()
         else:
             self._unsub_started = async_at_started(self._hass, self._handle_started)
 
+    @property
+    def _ha_running(self) -> bool:
+        return self._hass.state is CoreState.running
+
     @callback
     def _handle_started(self, _hass: HomeAssistant) -> None:
         self._unsub_started = None
-        self._spawn_check()
+        self._hass.async_create_task(self._async_check())
 
     @callback
     def async_unload(self) -> None:
@@ -120,9 +138,6 @@ class VafabMiljoInvoiceNotifier:
         if self._unsub_listener is not None:
             self._unsub_listener()
             self._unsub_listener = None
-        for task in list(self._tasks):
-            task.cancel()
-        self._tasks.clear()
 
     @property
     def reminder_time(self) -> time:
@@ -145,18 +160,15 @@ class VafabMiljoInvoiceNotifier:
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        self._spawn_check()
-
-    @callback
-    def _spawn_check(self) -> None:
-        task = self._hass.async_create_task(self._async_check())
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        if not self._ha_running:
+            # Still booting: the async_at_started hook will run the check once
+            # automations can actually hear the events.
+            return
+        self._hass.async_create_task(self._async_check())
 
     def _has_snapshot(self) -> bool:
-        """Whether the last refresh actually got an invoice list (a failed poll leaves invoices=None)."""
         data = self._coordinator.data
-        return data is not None and isinstance(data.invoices, dict) and isinstance(data.invoices.get("data"), list)
+        return data is not None and data.has_invoice_snapshot
 
     def _invoices(self) -> list[dict[str, Any]]:
         """Invoice items from the latest valid snapshot.
@@ -166,20 +178,16 @@ class VafabMiljoInvoiceNotifier:
         knows which invoice it was scheduled for.
         """
         if self._has_snapshot():
-            out: list[dict[str, Any]] = []
-            for inv in self._coordinator.data.invoices["data"]:
-                item = inv.get("item") if isinstance(inv, dict) else None
-                if isinstance(item, dict) and item.get("id") is not None:
-                    out.append(item)
-            self._last_invoices = out
+            self._last_invoices = self._coordinator.data.invoice_items
         return self._last_invoices
 
     async def _async_save(self) -> None:
         await self._store.async_save(
             {
+                "seeded": self._seeded,
                 "announced": sorted(self._announced),
                 "reminded": sorted(self._reminded),
-                "reminder_time": self._reminder_time.strftime("%H:%M"),
+                "reminder_time": self._reminder_time.isoformat(),
             }
         )
 
@@ -261,7 +269,7 @@ class VafabMiljoInvoiceNotifier:
             return
         inv, due = candidate
         remind_at = dt_util.start_of_local_day(due - timedelta(days=1)) + timedelta(
-            hours=self._reminder_time.hour, minutes=self._reminder_time.minute
+            hours=self._reminder_time.hour, minutes=self._reminder_time.minute, seconds=self._reminder_time.second
         )
         if remind_at <= now:
             # Reminder moment already passed (HA was down, or the reminder time

@@ -87,12 +87,18 @@ def _install_stub_homeassistant() -> None:
         def async_fire(self, event_type: str, event_data: dict[str, Any] | None = None) -> None:
             self.fired.append((event_type, event_data or {}))
 
+    class CoreState(str, enum.Enum):
+        not_running = "NOT_RUNNING"
+        starting = "STARTING"
+        running = "RUNNING"
+        stopping = "STOPPING"
+
     class HomeAssistant:
         def __init__(self) -> None:
             self.data: dict[str, Any] = {}
             self.services = _ServiceRegistry()
             self.bus = _EventBus()
-            self.is_running = True
+            self.state = CoreState.running
             # callbacks registered via helpers.start.async_at_started while not running
             self.started_callbacks: list[Any] = []
             self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts))
@@ -110,6 +116,7 @@ def _install_stub_homeassistant() -> None:
         return func
 
     core.HomeAssistant = HomeAssistant
+    core.CoreState = CoreState
     core.callback = callback
     core.ServiceCall = ServiceCall
     core.ServiceResponse = ServiceResponse
@@ -335,7 +342,9 @@ def _install_stub_homeassistant() -> None:
     start_mod = types.ModuleType("homeassistant.helpers.start")
 
     def async_at_started(hass, at_start_cb):
-        if hass.is_running:
+        from homeassistant.core import CoreState as _CoreState
+
+        if hass.state is _CoreState.running:
             at_start_cb(hass)
             return lambda: None
         hass.started_callbacks.append(at_start_cb)
@@ -364,6 +373,9 @@ def _install_stub_homeassistant() -> None:
 
         async def async_save(self, data) -> None:
             self._hass.data.setdefault("_stores", {})[self.key] = data
+
+        async def async_remove(self) -> None:
+            self._hass.data.setdefault("_stores", {}).pop(self.key, None)
 
     storage_mod.Store = Store
     sys.modules["homeassistant.helpers.storage"] = storage_mod

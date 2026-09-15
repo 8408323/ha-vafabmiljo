@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from vafabmiljo import _async_reload_entry, async_setup_entry, async_unload_entry
+from vafabmiljo import _async_reload_entry, async_remove_entry, async_setup_entry, async_unload_entry
 from vafabmiljo.const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE
 from vafabmiljo.coordinator import VafabMiljoCoordinator
 
@@ -29,7 +29,12 @@ def _entry() -> ConfigEntry:
 
 
 async def test_setup_entry_creates_coordinator_and_forwards_platforms(monkeypatch):
-    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", AsyncMock(return_value=None))
+    from vafabmiljo.coordinator import VafabMiljoData
+
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=False)
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
     hass = _hass()
     entry = _entry()
 
@@ -37,9 +42,29 @@ async def test_setup_entry_creates_coordinator_and_forwards_platforms(monkeypatc
 
     assert result is True
     assert isinstance(entry.runtime_data, VafabMiljoCoordinator)
-    assert entry.runtime_data.invoice_notifier is not None
+    # anonymous entry: no BankID, no invoices, no notifier
+    assert entry.runtime_data.invoice_notifier is None
     hass.config_entries.async_forward_entry_setups.assert_awaited_once()
     assert len(entry._unload_callbacks) == 1
+
+
+async def test_setup_entry_creates_notifier_for_authenticated_entry(monkeypatch):
+    from vafabmiljo.coordinator import VafabMiljoData
+
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": []})
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
+    hass = _hass()
+    entry = _entry()
+
+    await async_setup_entry(hass, entry)
+
+    notifier = entry.runtime_data.invoice_notifier
+    assert notifier is not None
+    # unload is wired through the entry's own hooks (update listener + notifier)
+    assert len(entry._unload_callbacks) == 2
+    assert entry._unload_callbacks[0] == notifier.async_unload
 
 
 async def test_reload_entry_calls_hass_reload():
@@ -62,14 +87,32 @@ async def test_unload_entry_delegates_to_hass():
     hass.config_entries.async_unload_platforms.assert_awaited_once()
 
 
-async def test_unload_entry_tears_down_invoice_notifier():
-    from unittest.mock import Mock
+async def test_setup_failure_after_notifier_tears_it_down(monkeypatch):
+    from vafabmiljo.coordinator import VafabMiljoData
 
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=True, invoices={"data": []})
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
     hass = _hass()
-    hass.config_entries.async_unload_platforms.return_value = True
+    hass.config_entries.async_forward_entry_setups.side_effect = RuntimeError("platform boom")
     entry = _entry()
-    entry.runtime_data = Mock()
 
-    await async_unload_entry(hass, entry)
+    import pytest
 
-    entry.runtime_data.invoice_notifier.async_unload.assert_called_once()
+    with pytest.raises(RuntimeError):
+        await async_setup_entry(hass, entry)
+
+    coordinator = entry.runtime_data
+    assert coordinator.invoice_notifier is None
+    assert coordinator._listeners == []  # notifier's listener was removed
+
+
+async def test_remove_entry_deletes_the_invoice_store():
+    hass = _hass()
+    hass.data["_stores"] = {"vafabmiljo.test_entry.invoices": {"announced": [1]}}
+    entry = _entry()
+
+    await async_remove_entry(hass, entry)
+
+    assert hass.data["_stores"] == {}

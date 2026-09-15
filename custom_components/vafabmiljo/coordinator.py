@@ -45,6 +45,32 @@ class VafabMiljoData:
         return [item for items in by_contract.values() for item in items]
 
     @property
+    def has_invoice_snapshot(self) -> bool:
+        """Whether the last refresh got a usable invoice list.
+
+        A failed poll leaves invoices=None. A list is usable when it is
+        genuinely empty (a new account) or decodes to at least one invoice; a
+        non-empty list of only junk rows is treated as *no* snapshot, so it can
+        neither baseline an empty seed nor evict a cached good list.
+        """
+        if not isinstance(self.invoices, dict) or not isinstance(self.invoices.get("data"), list):
+            return False
+        return not self.invoices["data"] or bool(self._decode_invoice_items())
+
+    @property
+    def invoice_items(self) -> list[dict[str, Any]]:
+        """Invoice items with an id - the one flattening the notifier and diagnostics share."""
+        return self._decode_invoice_items() if self.has_invoice_snapshot else []
+
+    def _decode_invoice_items(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for inv in self.invoices["data"]:
+            item = inv.get("item") if isinstance(inv, dict) else None
+            if isinstance(item, dict) and item.get("id") is not None:
+                out.append(item)
+        return out
+
+    @property
     def available_orders(self) -> list[dict[str, Any]]:
         return self._flatten_by_current_property(self.orders)
 

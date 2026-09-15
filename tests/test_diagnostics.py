@@ -25,7 +25,7 @@ async def test_diagnostics_redacts_identifying_data():
     coordinator.data = VafabMiljoData(
         pickups=[{"bins": [{"type": "Restavfall"}, {"type": "Matavfall"}]}],
         authenticated=True,
-        invoices={"data": [{"item": {"amount": 1}}, {"item": {"amount": 2}}]},
+        invoices={"data": [{"item": {"id": 1, "amount": 1}}, {"item": {"id": 2, "amount": 2}}, {"item": "junk"}]},
         sanitation={"contracts": [{"id": 1}]},
     )
     entry.runtime_data = coordinator
@@ -61,6 +61,6 @@ async def test_diagnostics_includes_invoice_notifier_state():
     assert result["invoice_notifier"] == {
         "announced_count": 3,
         "reminded_count": 1,
-        "reminder_time": "18:00",
-        "pending_reminder_invoice_id": 42,
+        "reminder_time": "18:00:00",
+        "has_pending_reminder": True,
     }
