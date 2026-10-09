@@ -50,4 +50,10 @@ class VafabMiljoPickupCalendar(CoordinatorEntity[VafabMiljoCoordinator], Calenda
     async def async_get_events(
         self, hass: HomeAssistant, start_date: datetime, end_date: datetime
     ) -> list[CalendarEvent]:
-        return [e for e in self._events() if e.start < end_date.date() and e.end > start_date.date()]
+        # all-day events run from local midnight to local midnight; compare as datetimes so a window
+        # like 10:00-12:00 on a pickup day still overlaps that day's event
+        return [
+            e
+            for e in self._events()
+            if dt_util.start_of_local_day(e.start) < end_date and dt_util.start_of_local_day(e.end) > start_date
+        ]

@@ -29,13 +29,16 @@ const daysUntil = (iso: string) => Math.round((utc(iso) - utc(todayIso())) / 864
 export function addresses(hass: any): Addr[] {
   const by: Record<string, Addr> = {};
   for (const e of Object.values((hass.entities ?? {}) as Record<string, Ent>)) {
+    // the address comes from the registry, so it stays in the panel (login, recipients) even when
+    // all its entities are disabled and have no state
+    if (e.platform !== "vafabmiljo" || !e.device_id) continue;
     const s: St | undefined = hass.states[e.entity_id];
-    if (e.platform !== "vafabmiljo" || !s || !e.device_id) continue;
     const dev = hass.devices?.[e.device_id];
     const a = (by[e.device_id] ??= {
       id: e.device_id, entryId: dev?.primary_config_entry ?? dev?.config_entries?.[0], name: dev?.name_by_user || dev?.name || "VafabMiljö",
       pickups: [], fees: [], switches: [], times: [],
     });
+    if (!s) continue;
     const domain = e.entity_id.split(".")[0];
     if (domain === "sensor" && s.attributes.device_class === "date") a.pickups.push(s);
     else if (e.translation_key === "latest_invoice") a.invoice = s;

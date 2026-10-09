@@ -10280,9 +10280,8 @@ var ue = [
 function _e(e) {
 	let t = {};
 	for (let n of Object.values(e.entities ?? {})) {
-		let r = e.states[n.entity_id];
-		if (n.platform !== "vafabmiljo" || !r || !n.device_id) continue;
-		let i = e.devices?.[n.device_id], a = t[n.device_id] ??= {
+		if (n.platform !== "vafabmiljo" || !n.device_id) continue;
+		let r = e.states[n.entity_id], i = e.devices?.[n.device_id], a = t[n.device_id] ??= {
 			id: n.device_id,
 			entryId: i?.primary_config_entry ?? i?.config_entries?.[0],
 			name: i?.name_by_user || i?.name || "VafabMiljö",
@@ -10290,7 +10289,9 @@ function _e(e) {
 			fees: [],
 			switches: [],
 			times: []
-		}, o = n.entity_id.split(".")[0];
+		};
+		if (!r) continue;
+		let o = n.entity_id.split(".")[0];
 		o === "sensor" && r.attributes.device_class === "date" ? a.pickups.push(r) : n.translation_key === "latest_invoice" ? a.invoice = r : n.translation_key === "property" ? a.property = r : n.translation_key === "bankid_connected" ? a.bankid = r : o === "sensor" && "pickups_per_year" in r.attributes ? a.fees.push(r) : o === "calendar" ? a.calendar = r : o === "switch" ? a.switches.push(r) : o === "time" && a.times.push(r);
 	}
 	return Object.values(t).sort((e, t) => e.name.localeCompare(t.name));
