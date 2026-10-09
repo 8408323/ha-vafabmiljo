@@ -13,8 +13,19 @@ if (shift != null) {
   for (const s of Object.values(mock.states)) if (s.attributes.device_class === "date")
     s.state = new Date(base.getTime() + Date.parse(s.state) - first).toISOString().slice(0, 10);
 }
+// ?due=2 makes only the 3rd bin due tomorrow (the others in a week), to check a mixed row
+const due = q.get("due");
+if (due != null) Object.values(mock.states).filter((s) => s.attributes.device_class === "date").forEach((s, i) => {
+  const d = new Date(); d.setDate(d.getDate() + (i === Number(due) ? 1 : 7)); s.state = d.toISOString().slice(0, 10);
+});
 const p = document.getElementById("p");
 p.narrow = innerWidth < 600;
-p.hass = { language: q.get("lang") || "sv", ...mock,
+// notify recipients live in memory here; the real panel talks to reminders.py
+let recipients = [{ service: "mobile_app_jonathans_iphone", pickup: true, pickup_days_before: 1, pickup_time: "18:00", new_invoice: true, invoice_due: true }];
+const connection = { sendMessagePromise: async (msg) => {
+  if (msg.type === "vafabmiljo/notify/set") recipients = msg.recipients;
+  return { recipients, services: ["mobile_app_jonathans_iphone", "mobile_app_sofias_pixel", "persistent_notification"] };
+} };
+p.hass = { language: q.get("lang") || "sv", ...mock, connection, user: { is_admin: true },
   callService: async (...a) => { console.log("callService", ...a); return { response: { path: "about:blank" } }; } };
 </script></body></html>

@@ -85,8 +85,19 @@ def _install_stub_homeassistant() -> None:
         def __init__(self) -> None:
             self.fired: list[tuple[str, dict[str, Any]]] = []
 
+            self.listeners: list[tuple[str, Any]] = []
+
         def async_fire(self, event_type: str, event_data: dict[str, Any] | None = None) -> None:
             self.fired.append((event_type, event_data or {}))
+
+        def async_listen(self, event_type: str, listener):
+            item = (event_type, listener)
+            self.listeners.append(item)
+            return lambda: self.listeners.remove(item)
+
+    class Event:
+        def __init__(self, event_type: str, data: dict[str, Any] | None = None) -> None:
+            self.event_type, self.data = event_type, data or {}
 
     class CoreState(str, enum.Enum):
         not_running = "NOT_RUNNING"
@@ -102,7 +113,8 @@ def _install_stub_homeassistant() -> None:
             self.state = CoreState.running
             # callbacks registered via helpers.start.async_at_started while not running
             self.started_callbacks: list[Any] = []
-            self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts))
+            self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts), language="sv")
+            self.time_listeners: list[Any] = []
             self.scheduled_jobs: list[Any] = []
             # (action, when) pairs registered via async_track_point_in_time
             self.scheduled_timers: list[tuple[Any, Any]] = []
@@ -123,6 +135,7 @@ def _install_stub_homeassistant() -> None:
         return func
 
     core.HomeAssistant = HomeAssistant
+    core.Event = Event
     core.CoreState = CoreState
     core.callback = callback
     core.ServiceCall = ServiceCall
@@ -151,6 +164,7 @@ def _install_stub_homeassistant() -> None:
             self.data = data or {}
             self.options = options or {}
             self.entry_id = "test_entry"
+            self.domain = "vafabmiljo"
             self.runtime_data: Any = None
             self._unload_callbacks: list = []
 
@@ -342,6 +356,12 @@ def _install_stub_homeassistant() -> None:
 
         return _unsub
 
+    def async_track_time_change(hass, action, hour=None, minute=None, second=None):
+        item = (action, (hour, minute, second))
+        hass.time_listeners.append(item)
+        return lambda: hass.time_listeners.remove(item)
+
+    event_mod.async_track_time_change = async_track_time_change
     event_mod.async_call_later = async_call_later
     event_mod.async_track_point_in_time = async_track_point_in_time
     sys.modules["homeassistant.helpers.event"] = event_mod
@@ -518,6 +538,31 @@ def _install_stub_homeassistant() -> None:
     panel_custom_mod.async_register_panel = async_register_panel
     components.panel_custom = panel_custom_mod
     sys.modules["homeassistant.components.panel_custom"] = panel_custom_mod
+
+    websocket_mod = types.ModuleType("homeassistant.components.websocket_api")
+    websocket_mod.registered = []
+
+    def websocket_command(schema):
+        def wrap(func):
+            func.schema = schema
+            return func
+
+        return wrap
+
+    def _passthrough(func):
+        func.admin = getattr(func, "admin", False)
+        return func
+
+    def require_admin(func):
+        func.admin = True
+        return func
+
+    websocket_mod.websocket_command = websocket_command
+    websocket_mod.require_admin = require_admin
+    websocket_mod.async_response = _passthrough
+    websocket_mod.async_register_command = lambda hass, cmd: websocket_mod.registered.append(cmd)
+    components.websocket_api = websocket_mod
+    sys.modules["homeassistant.components.websocket_api"] = websocket_mod
 
     diagnostics_mod = types.ModuleType("homeassistant.components.diagnostics")
     REDACTED = "**REDACTED**"

@@ -1,14 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import House, { SceneBin, binColor } from "./House";
-import { T, pick } from "./i18n";
+import { LANGS, T, pick } from "./i18n";
 
-// Everything comes from the integration's own entities (entity registry + states), so the panel needs no
-// backend API of its own and shows exactly what automations see.
+// Everything comes from the integration's own entities (entity registry + states), so the panel shows exactly
+// what automations see. Only the notification recipients have their own websocket API (reminders.py).
 type Ent = { entity_id: string; device_id?: string; platform: string; translation_key?: string };
 type St = { entity_id: string; state: string; attributes: Record<string, any> };
 type Invoice = { id: number; amount: number | null; invoice_date: string | null; due_date: string | null; payment_status: string | null };
 type Addr = {
-  id: string; name: string; pickups: St[]; invoice?: St; fees: St[]; property?: St; calendar?: St; switches: St[]; times: St[];
+  id: string; entryId?: string; name: string; pickups: St[]; invoice?: St; fees: St[]; property?: St; calendar?: St; switches: St[]; times: St[];
 };
 type Ctx = { hass: any; t: T; locale: string };
 
@@ -27,8 +27,9 @@ export function addresses(hass: any): Addr[] {
   for (const e of Object.values((hass.entities ?? {}) as Record<string, Ent>)) {
     const s: St | undefined = hass.states[e.entity_id];
     if (e.platform !== "vafabmiljo" || !s || !e.device_id) continue;
+    const dev = hass.devices?.[e.device_id];
     const a = (by[e.device_id] ??= {
-      id: e.device_id, name: hass.devices?.[e.device_id]?.name_by_user || hass.devices?.[e.device_id]?.name || "VafabMiljö",
+      id: e.device_id, entryId: dev?.primary_config_entry ?? dev?.config_entries?.[0], name: dev?.name_by_user || dev?.name || "VafabMiljö",
       pickups: [], fees: [], switches: [], times: [],
     });
     const domain = e.entity_id.split(".")[0];
@@ -52,13 +53,17 @@ const short = (s: St, a: Addr) => {
 function when(iso: string | undefined, { t, locale }: Ctx) {
   if (!iso || iso === "unknown" || iso === "unavailable") return { when: "–", sub: "", days: null };
   const n = daysUntil(iso);
-  const date = day(iso).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
+  // the weekday spelled out, so "which day" is never in doubt
+  const date = day(iso).toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "short" });
   const rel = n === 0 ? t.today : n === 1 ? t.tomorrow : t.in_days.replace("{n}", String(n));
-  return n <= 1 ? { when: rel[0].toUpperCase() + rel.slice(1), sub: date, days: n } : { when: date, sub: rel, days: n };
+  const cap = (x: string) => x[0].toUpperCase() + x.slice(1);
+  return n <= 1 ? { when: cap(rel), sub: date, days: n } : { when: cap(date), sub: rel, days: n };
 }
 
 export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
-  const { t, locale } = pick(hass.locale?.language ?? hass.language);
+  const [lang, setLangState] = useState<string | null>(() => localStorage.getItem("vm_lang"));
+  const setLang = (x: string | null) => { setLangState(x); x ? localStorage.setItem("vm_lang", x) : localStorage.removeItem("vm_lang"); };
+  const { t, locale } = pick(hass.locale?.language ?? hass.language, lang);
   const [tab, setTab] = useState<Tab>(() => (localStorage.getItem("vm_tab") as Tab) || "overview");
   const [sel, setSel] = useState<string | null>(() => localStorage.getItem("vm_addr"));
   const list = addresses(hass);
@@ -84,7 +89,7 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
         <>
           {tab === "overview" && <Overview {...ctx} a={a} />}
           {tab === "invoices" && <Invoices {...ctx} a={a} />}
-          {tab === "settings" && <Settings {...ctx} a={a} />}
+          {tab === "settings" && <Settings {...ctx} a={a} lang={lang} setLang={setLang} />}
         </>
       )}
     </div>
@@ -109,7 +114,16 @@ function Overview({ a, ...ctx }: Ctx & { a: Addr }) {
           : tonight.length ? `🗑️ ${t.put_out}: ${tonight.map((b) => b.type).join(", ")}` : `✅ ${t.nothing_tonight}`}
       </div>
       <div className="grid-overview">
-        <div className="card scene"><House bins={scene} truck={now.length > 0} /></div>
+        <div className="card scene">
+          <House bins={scene} truck={now.length > 0} />
+          {/* same left-to-right order as the bins in the drawing */}
+          <div className="bin-tags">{scene.map((b) => (
+            <div key={b.type} className={`bin-tag ${b.next ? "next" : ""}`}>
+              <span className="swatch" style={{ background: binColor(b.type) }} />
+              <div><div className="label">{b.type}</div><b>{b.when}</b> <span className="muted">{b.sub}</span></div>
+            </div>
+          ))}</div>
+        </div>
         <div className="side">
           <div className="card">
             <div className="label">{t.next}</div>
@@ -208,9 +222,20 @@ function Invoices({ a, hass, t, locale }: Ctx & { a: Addr }) {
 }
 
 /* ---------------- Settings ---------------- */
-function Settings({ a, hass, t }: Ctx & { a: Addr }) {
+function Settings({ a, hass, t, lang, setLang }: Ctx & { a: Addr; lang: string | null; setLang: (x: string | null) => void }) {
   return (
     <div className="settings-grid">
+      <Recipients a={a} hass={hass} t={t} />
+      <div className="card">
+        <h2>{t.language}</h2>
+        <label className="row">
+          <span>{t.language}</span>
+          <select value={lang ?? ""} onChange={(e) => setLang(e.target.value || null)}>
+            <option value="">{t.lang_auto}</option>
+            {Object.entries(LANGS).map(([code, [, , name]]) => <option key={code} value={code}>{name}</option>)}
+          </select>
+        </label>
+      </div>
       {a.switches.length > 0 && <div className="card">
         <h2>{t.notifications}</h2>
         {a.switches.map((s) => (
@@ -231,6 +256,120 @@ function Settings({ a, hass, t }: Ctx & { a: Addr }) {
           </label>
         ))}
       </div>}
+    </div>
+  );
+}
+
+/* ---------------- Notification recipients ---------------- */
+type Recipient = { service: string; pickup: boolean; pickup_days_before: 0 | 1; pickup_time: string; new_invoice: boolean; invoice_due: boolean };
+const NEW: Omit<Recipient, "service"> = { pickup: true, pickup_days_before: 1, pickup_time: "18:00", new_invoice: true, invoice_due: true };
+
+// "mobile_app_jonathans_iphone" -> "Jonathans iphone"; the HA app's own device name when we can find it
+function serviceName(hass: any, service: string) {
+  const slug = service.replace(/^mobile_app_/, "");
+  const dev = Object.values((hass.devices ?? {}) as Record<string, any>).find((d) => (d.name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_") === slug);
+  const name = dev?.name_by_user || dev?.name || slug.replace(/_/g, " ");
+  return name[0].toUpperCase() + name.slice(1);
+}
+
+function Recipients({ a, hass, t }: { a: Addr; hass: any; t: T }) {
+  const [list, setList] = useState<Recipient[] | null>(null);
+  const [services, setServices] = useState<string[]>([]);
+  const [edit, setEdit] = useState<{ r: Recipient; index: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const admin = hass.user?.is_admin !== false;
+
+  useEffect(() => {
+    if (!a.entryId) return;
+    hass.connection.sendMessagePromise({ type: "vafabmiljo/notify/get", entry_id: a.entryId })
+      .then((r: any) => { setList(r.recipients); setServices(r.services); }).catch((e: any) => setErr(e?.message ?? String(e)));
+  }, [a.entryId]);
+
+  const save = async (next: Recipient[]) => {
+    try {
+      const r = await hass.connection.sendMessagePromise({ type: "vafabmiljo/notify/set", entry_id: a.entryId, recipients: next });
+      setList(r.recipients); setEdit(null); setErr(null);
+    } catch (e: any) { setErr(e?.message ?? String(e)); }
+  };
+  const summary = (r: Recipient) => [
+    r.pickup && `${t.pickup_reminder}: ${(r.pickup_days_before ? t.evening_before : t.same_morning).toLowerCase()} ${t.at} ${r.pickup_time}`,
+    r.new_invoice && t.new_invoice, r.invoice_due && t.invoice_due,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <div className="card">
+      <h2>{t.ha_notify}</h2>
+      <div className="muted" style={{ margin: "4px 0 8px" }}>{t.ha_notify_info}</div>
+      {err && <div className="neg">{err}</div>}
+      {list?.length === 0 && <div className="muted">{t.no_recipients}</div>}
+      {list?.map((r, i) => (
+        <button key={r.service} className="row recipient" disabled={!admin} onClick={() => setEdit({ r, index: i })}>
+          <span><b>{serviceName(hass, r.service)}</b><br /><span className="muted">{summary(r) || "–"}</span></span>
+          <span className="muted">›</span>
+        </button>
+      ))}
+      {admin ? list && (
+        <button className="btn" disabled={!services.some((s) => !list.some((r) => r.service === s))}
+          onClick={() => setEdit({ r: { service: services.find((s) => !list.some((r) => r.service === s))!, ...NEW }, index: -1 })}>
+          + {t.add_recipient}
+        </button>
+      ) : <div className="muted">{t.admin_only}</div>}
+      {edit && list && <RecipientModal t={t} hass={hass} init={edit.r} services={services.filter((s) => s === edit.r.service || !list.some((r) => r.service === s))}
+        onClose={() => setEdit(null)}
+        onSave={(r) => save(edit.index < 0 ? [...list, r] : list.map((x, i) => (i === edit.index ? r : x)))}
+        onRemove={edit.index < 0 ? undefined : () => save(list.filter((_, i) => i !== edit.index))} />}
+    </div>
+  );
+}
+
+function RecipientModal({ t, hass, init, services, onClose, onSave, onRemove }:
+  { t: T; hass: any; init: Recipient; services: string[]; onClose: () => void; onSave: (r: Recipient) => void; onRemove?: () => void }) {
+  const [r, setR] = useState(init);
+  const set = (p: Partial<Recipient>) => setR({ ...r, ...p });
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);
+  return (
+    <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal card" role="dialog" aria-modal="true" aria-label={t.recipient}>
+        <h2>{t.recipient}</h2>
+        <label className="row">
+          <span>{t.recipient}</span>
+          <select value={r.service} onChange={(e) => set({ service: e.target.value })}>
+            {services.map((s) => <option key={s} value={s}>{serviceName(hass, s)}</option>)}
+          </select>
+        </label>
+        <label className="row">
+          <span>{t.pickup_reminder}</span>
+          <input type="checkbox" className="toggle" checked={r.pickup} onChange={(e) => set({ pickup: e.target.checked })} />
+        </label>
+        {r.pickup && <div className="row sub">
+          <div className="seg">
+            {([1, 0] as const).map((d) => (
+              <button key={d} className={r.pickup_days_before === d ? "on" : ""} onClick={() => set({ pickup_days_before: d })}>
+                {d ? t.evening_before : t.same_morning}
+              </button>
+            ))}
+          </div>
+          <span>{t.at} <input type="time" value={r.pickup_time} onChange={(e) => e.target.value && set({ pickup_time: e.target.value })} /></span>
+        </div>}
+        <label className="row">
+          <span>{t.new_invoice}</span>
+          <input type="checkbox" className="toggle" checked={r.new_invoice} onChange={(e) => set({ new_invoice: e.target.checked })} />
+        </label>
+        <label className="row">
+          <span>{t.invoice_due}</span>
+          <input type="checkbox" className="toggle" checked={r.invoice_due} onChange={(e) => set({ invoice_due: e.target.checked })} />
+        </label>
+        <div className="modal-actions">
+          {onRemove && <button className="btn danger" onClick={onRemove}>{t.remove}</button>}
+          <span style={{ flex: 1 }} />
+          <button className="btn" onClick={onClose}>{t.cancel}</button>
+          <button className="btn primary" onClick={() => onSave(r)}>{t.save}</button>
+        </div>
+      </div>
     </div>
   );
 }

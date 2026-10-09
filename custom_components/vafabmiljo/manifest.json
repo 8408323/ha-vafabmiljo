@@ -8,7 +8,8 @@
   "dependencies": [
     "http",
     "frontend",
-    "panel_custom"
+    "panel_custom",
+    "websocket_api"
   ],
   "documentation": "https://github.com/8408323/ha-vafabmiljo",
   "integration_type": "hub",

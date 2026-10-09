@@ -75,16 +75,23 @@ Available in English and Swedish, matching HA's own language setting.
 - `vafabmiljo_new_invoice` / `vafabmiljo_invoice_due_reminder` events, fired exactly once
   per invoice (persisted across restarts), plus a local **Invoice reminder time** entity
 - Diagnostics download and a "BankID connected" sensor
-- A **VafabMiljö sidebar panel**: an isometric house whose bins roll out to the curb the
-  evening before pickup (and a truck on the day), next-pickup list, invoices with PDF links
-  and a per-year total, contract fees, and the notification switches/times
+- A **VafabMiljö sidebar panel**: an isometric house with your bins lined up at the road
+  (the next pickup's bins glow, a refuse truck on pickup day), next-pickup list, invoices
+  with PDF links and a per-year total, contract fees, and the notification switches/times.
+  Language follows Home Assistant or can be set in the panel: Swedish, Norwegian, Danish,
+  Finnish, Icelandic, English
+- **Notifications per recipient**, set up in the panel (Settings → Notifications from Home
+  Assistant): pick a phone (or any notify service), whether it gets the pickup reminder
+  (the evening before or the same morning, at its own time), new invoices and invoice-due
+  reminders. Off until you add a recipient, so it never doubles up with your own
+  automations on the events
 - A **pickup calendar** entity (one all-day event per pickup date) for HA's calendar view
 
 ### Panel development
 
 The panel is React + Vite in `frontend/`, built into `custom_components/vafabmiljo/www/`
 (committed, so HACS installs work without Node). `npm run dev` serves a preview with mock
-data (`?in=0` / `?in=1` shifts the pickups to today / tomorrow, `?lang=en`); run
+data (`?in=0` / `?in=1` shifts the pickups to today / tomorrow, `?due=2` makes only the third bin due, `?lang=en`); run
 `npm run build` before committing frontend changes.
 
 ## Authentication

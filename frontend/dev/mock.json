@@ -232,7 +232,16 @@
  },
  "devices": {
   "dev1": {
-   "name": "Exempelgatan 1, Exempelstad"
+   "name": "Exempelgatan 1, Exempelstad",
+   "config_entries": [
+    "entry1"
+   ]
+  },
+  "phone1": {
+   "name": "Jonathans iPhone"
+  },
+  "phone2": {
+   "name": "Sofias Pixel"
   }
  }
 }

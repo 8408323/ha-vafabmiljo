@@ -1,8 +1,8 @@
 // Isometric house with its bins, same projection style as the villa-energy panel. Pure SVG, drawn back to front.
-// Bins due today/tomorrow roll out to the curb; the next pickup's bins glow.
+// The bins stand in a row at the curb; the next pickup's bins glow. Dates are shown under the scene (App.tsx).
 
 type V = [number, number, number];
-const S = 34, CX = 320, CY = 135;
+const S = 35, CX = 385, CY = 112;
 // isometric projection: x runs right-down, y left-down, z up
 const P = ([x, y, z]: V): [number, number] => [CX + (x - y) * 0.866 * S, CY + (x + y) * 0.5 * S - z * S];
 const pts = (vs: V[]) => vs.map((v) => P(v).join(",")).join(" ");
@@ -63,16 +63,46 @@ function tree(x: number, y: number) {
     <ellipse cx={tx} cy={ty - 44} rx={15} ry={24} fill="#22b07d" /><ellipse cx={tx - 4} cy={ty - 50} rx={7} ry={11} fill="#3ccf96" opacity={0.6} /></g>;
 }
 
+// a circle in the plane y = const (a wheel on the truck's near side)
+const disc = (x: number, y: number, z: number, r: number) =>
+  pts(Array.from({ length: 16 }, (_, k) => [x + r * Math.cos((k * Math.PI) / 8), y, z + r * Math.sin((k * Math.PI) / 8)] as V));
+
+// refuse truck driving along +x on the near lane: compactor body at the back, cab at the front
+function Truck() {
+  const y0 = 7.05, y1 = 8.35, X = 2.2;  // X = rear end
+  const exhaust = P([X + 4.1, y0 + 0.1, 2.75]);
+  return <g className="truck">
+    {/* chassis, compactor body with a rounded tail and a stripe, cab with windscreen and side window */}
+    {box(X + 0.1, X + 5.2, y0 + 0.1, y1 - 0.1, 0.32, 0.55, "#2b2f37", "#1d2027", "#3a3f48")}
+    {box(X, X + 3.5, y0, y1, 0.55, 2.35, "#2f9e5b", "#257d48", "#3cb96c")}
+    <polygon points={pts([[X, y1 + 0.005, 0.55], [X + 3.5, y1 + 0.005, 0.55], [X + 3.5, y1 + 0.005, 0.8], [X, y1 + 0.005, 0.8]])} fill="#e9eef5" />
+    <polygon points={pts([[X + 0.15, y1 + 0.005, 1.0], [X + 3.3, y1 + 0.005, 1.0], [X + 3.3, y1 + 0.005, 2.1], [X + 0.15, y1 + 0.005, 2.1]])} fill="#38b26a" />
+    <text x={P([X + 1.75, y1, 1.45])[0]} y={P([X + 1.75, y1, 1.45])[1]} className="truck-logo" transform={`rotate(30 ${P([X + 1.75, y1, 1.45]).join(" ")})`}>VafabMiljö</text>
+    {box(X + 3.6, X + 5.0, y0, y1, 0.55, 2.0, "#e9eef5", "#c9d3e0", "#f4f7fb")}
+    <polygon points={pts([[X + 5.01, y0 + 0.15, 1.2], [X + 5.01, y1 - 0.15, 1.2], [X + 5.01, y1 - 0.15, 1.85], [X + 5.01, y0 + 0.15, 1.85]])} fill="#9fd3f2" />
+    <polygon points={pts([[X + 3.75, y1 + 0.005, 1.25], [X + 4.6, y1 + 0.005, 1.25], [X + 4.6, y1 + 0.005, 1.85], [X + 3.75, y1 + 0.005, 1.85]])} fill="#9fd3f2" />
+    <polygon points={pts([[X + 5.01, y1 - 0.35, 0.65], [X + 5.01, y1 - 0.12, 0.65], [X + 5.01, y1 - 0.12, 0.8], [X + 5.01, y1 - 0.35, 0.8]])} fill="#fff3c4" />
+    <polygon points={pts([[X + 0.6, y0 + 0.4, 2.36], [X + 1.0, y0 + 0.4, 2.36], [X + 1.0, y0 + 0.8, 2.36], [X + 0.6, y0 + 0.8, 2.36]])} fill="#f5b301" />
+    {/* wheels: tyre + hub on the near side */}
+    {[X + 0.7, X + 1.7, X + 4.3].map((x) => <g key={x}>
+      <polygon points={disc(x, y1 + 0.01, 0.38, 0.38)} fill="#15171b" />
+      <polygon points={disc(x, y1 + 0.02, 0.38, 0.16)} fill="#9aa4b2" />
+    </g>)}
+    {/* exhaust stack behind the cab, puffing */}
+    {box(X + 4.0, X + 4.15, y0 + 0.05, y0 + 0.2, 2.0, 2.75, "#6b7484", "#4a5262", "#8a96a8")}
+    {[0, 1, 2].map((k) => <circle key={k} cx={exhaust[0]} cy={exhaust[1]} r={5} className="smoke" style={{ animationDelay: `${k * 0.8}s` }} />)}
+  </g>;
+}
+
 export default function House({ bins, truck }: { bins: SceneBin[]; truck: boolean }) {
-  // bins side by side along the front wall, each as wide as its real counterpart
-  const xs = bins.reduce<number[]>((acc, b, i) => [...acc, i ? acc[i - 1] + spec(bins[i - 1].type).w * K + 0.25 : 0.3], []);
-  const home = (i: number): V => [xs[i], 3.75, 0];
-  const curb = (i: number): V => [xs[i], 6.0, 0];
-  const out = (b: SceneBin) => b.days != null && b.days <= 1;
-  // draw the bins still by the wall first, the ones out at the curb (closer to the viewer) last
-  const order = bins.map((b, i) => [b, i] as const).sort(([a], [b]) => Number(out(a)) - Number(out(b)));
+  // one row of bins along the road, fronts aligned at the curb, each as wide as its real counterpart.
+  // The row never changes shape: which ones are due is shown by the glow (and the tags under the scene).
+  const xs = bins.reduce<number[]>((acc, b, i) => [...acc, i ? acc[i - 1] + spec(bins[i - 1].type).w * K + 0.9 : -4.3], []);
+  const CURB = 6.8;
+  const y0 = (b: SceneBin) => CURB - spec(b.type).d * K;
+  // back to front: in an isometric row along x the rightmost bin is nearest the viewer, so draw left to right
   return (
-    <svg viewBox="0 0 640 430" className="house-scene" role="img" aria-label="house with waste bins">
+    <svg viewBox="0 0 640 400" className="house-scene" role="img" aria-label="house with waste bins">
       <defs>
         <linearGradient id="hs-wall" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#f4f7fb" /><stop offset="100%" stopColor="#dde4ee" />
@@ -83,11 +113,11 @@ export default function House({ bins, truck }: { bins: SceneBin[]; truck: boolea
       </defs>
       <ellipse cx={P([3, 4, 0])[0]} cy={P([3, 4, 0])[1]} rx={300} ry={140} fill="url(#hs-ground)" />
       {/* plot, path to the street, street with its centre line */}
-      <polygon points={pts([[-1.5, -0.5, 0], [9, -0.5, 0], [9, 6.9, 0], [-1.5, 6.9, 0]])} className="hs-plot" />
+      <polygon points={pts([[-4.8, -0.5, 0], [7.6, -0.5, 0], [7.6, 6.9, 0], [-4.8, 6.9, 0]])} className="hs-plot" />
       <polygon points={pts([[3.5, 3.5, 0], [4.5, 3.5, 0], [4.5, 6.9, 0], [3.5, 6.9, 0]])} className="hs-path" />
-      <polygon points={pts([[-1.5, 6.9, 0], [9, 6.9, 0], [9, 8.6, 0], [-1.5, 8.6, 0]])} className="hs-street" />
-      <polyline points={pts([[-1.5, 7.75, 0], [9, 7.75, 0]])} className="hs-lane" />
-      {tree(-1, 0.4)}{tree(-0.6, -0.2)}
+      <polygon points={pts([[-4.8, 6.9, 0], [7.6, 6.9, 0], [7.6, 8.6, 0], [-4.8, 8.6, 0]])} className="hs-street" />
+      <polyline points={pts([[-4.8, 7.75, 0], [7.6, 7.75, 0]])} className="hs-lane" />
+      {tree(-3.6, 1.6)}{tree(-2.4, 0.2)}
 
       {/* house: side wall with gable, front wall, windows, door, roof */}
       <polygon points={pts([[6, 0, 0], [6, 3.5, 0], [6, 3.5, 2.6], [6, 1.75, 4.3], [6, 0, 2.6]])} fill="#c9d3e0" stroke="#b7c2d1" />
@@ -102,34 +132,13 @@ export default function House({ bins, truck }: { bins: SceneBin[]; truck: boolea
       <polygon points={pts([[6.3, 1.75, 4.3], [6.3, -0.4, 2.45], [6.3, -0.4, 2.3], [6.3, 1.75, 4.15]])} fill="#1d2027" />
       <polygon points={pts([[-0.3, 3.9, 2.45], [6.3, 3.9, 2.45], [6.3, 1.75, 4.3], [-0.3, 1.75, 4.3]])} className="hs-roof" />
       <polygon points={pts([[6.3, 3.9, 2.45], [6.3, 3.9, 2.3], [6.3, 1.75, 4.15], [6.3, 1.75, 4.3]])} fill="#1d2027" />
-      {tree(8, 3.2)}
+      {tree(7.0, 1.2)}
 
-      {order.map(([b, i]) => {
-        const [hx, hy] = P(home(i)), [cx, cy] = P(curb(i));
-        const [dx, dy] = out(b) ? [cx - hx, cy - hy] : [0, 0];
-        return <g key={b.type} className="bin" style={{ transform: `translate(${dx}px,${dy}px)` }}>
-          <Bin x={home(i)[0]} y={home(i)[1]} type={b.type} glow={b.next} />
-        </g>;
-      })}
 
-      {truck && <g className="truck">
-        {box(4, 7.6, 7.0, 8.3, 0.35, 2.2, "#2f9e5b", "#257d48", "#3cb96c")}
-        {box(7.6, 8.6, 7.0, 8.3, 0.35, 1.6, "#e9eef5", "#c9d3e0", "#f4f7fb")}
-        <polygon points={pts([[8.61, 7.2, 1.0], [8.61, 8.1, 1.0], [8.61, 8.1, 1.45], [8.61, 7.2, 1.45]])} fill="#9fd3f2" />
-      </g>}
+      {bins.map((b, i) => <Bin key={b.type} x={xs[i]} y={y0(b)} type={b.type} glow={b.next} />)}
 
-      {/* labels in a column on the left, each with a leader line to its bin's lid */}
-      {bins.map((b, i) => {
-        const ly = 40 + i * 62, [x, y] = (out(b) ? curb : home)(i), sp = spec(b.type);
-        const [tx, ty] = P([x + sp.w * K / 2, y + sp.d * K / 2, sp.h * K + 0.1]);
-        return <g key={b.type} className="hs-tag">
-          <polyline points={`150,${ly + 22} 162,${ly + 22} ${tx},${ty}`} className="hs-leader" />
-          <circle cx={tx} cy={ty} r={2.5} fill={binColor(b.type)} />
-          <text className="hs-title" x={16} y={ly}>{b.type}</text>
-          <text className="hs-value" x={16} y={ly + 22} style={{ fill: b.next ? "var(--vm-accent)" : undefined }}>{b.when}</text>
-          <text className="hs-sub" x={16} y={ly + 38}>{b.sub}</text>
-        </g>;
-      })}
+      {/* drawn after the bins (it is closer to the viewer), but parked past them: it has just emptied them */}
+      {truck && <Truck />}
     </svg>
   );
 }

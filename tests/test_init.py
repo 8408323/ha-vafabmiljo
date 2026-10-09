@@ -45,7 +45,7 @@ async def test_setup_entry_creates_coordinator_and_forwards_platforms(monkeypatc
     # anonymous entry: no BankID, no invoices, no notifier
     assert entry.runtime_data.invoice_notifier is None
     hass.config_entries.async_forward_entry_setups.assert_awaited_once()
-    assert len(entry._unload_callbacks) == 1
+    assert len(entry._unload_callbacks) == 2  # reminders + update listener
 
 
 async def test_setup_entry_creates_notifier_for_authenticated_entry(monkeypatch):
@@ -63,8 +63,8 @@ async def test_setup_entry_creates_notifier_for_authenticated_entry(monkeypatch)
     notifier = entry.runtime_data.invoice_notifier
     assert notifier is not None
     # unload is wired through the entry's own hooks (update listener + notifier)
-    assert len(entry._unload_callbacks) == 2
-    assert entry._unload_callbacks[0] == notifier.async_unload
+    assert len(entry._unload_callbacks) == 3  # reminders + invoice notifier + update listener
+    assert entry._unload_callbacks[1] == notifier.async_unload
 
 
 async def test_reload_entry_calls_hass_reload():
@@ -106,6 +106,7 @@ async def test_setup_failure_after_notifier_tears_it_down(monkeypatch):
     coordinator = entry.runtime_data
     assert coordinator.invoice_notifier is None
     assert coordinator._listeners == []  # notifier's listener was removed
+    assert hass.bus.listeners == []  # and the reminders' event listeners
 
 
 async def test_notifier_setup_failure_tears_it_down(monkeypatch):
