@@ -11,7 +11,6 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import VafabMiljoAuthError, VafabMiljoClient, VafabMiljoError
@@ -56,6 +55,8 @@ class VafabMiljoData:
 
     pickups: list[dict[str, Any]] = field(default_factory=list)
     authenticated: bool = False
+    # BankID configured, but the backend rejected the session: account data is missing until a new login
+    session_expired: bool = False
     invoices: dict[str, Any] | None = None
     sanitation: dict[str, Any] | None = None
     properties: dict[str, Any] | None = None
@@ -133,6 +134,7 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         # Set by __init__ after the first refresh; None until then (and in tests
         # that build a coordinator directly).
         self.invoice_notifier: Any = None
+        self.reminders: Any = None  # reminders.VafabMiljoNotifier, set by __init__
 
     async def _async_update_data(self) -> VafabMiljoData:
         try:
@@ -143,14 +145,25 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         if not self.client.session_cookie:
             return VafabMiljoData(pickups=pickups, authenticated=False)
 
+        try:
+            return await self._async_fetch_account(pickups)
+        except VafabMiljoAuthError:
+            # The pickup calendar needs no login, so keep it going instead of failing the whole
+            # refresh (ConfigEntryAuthFailed would make every entity unavailable); ask HA for a new
+            # BankID login and let the panel / notifier tell the user.
+            self.entry.async_start_reauth(self.hass)
+            return VafabMiljoData(pickups=pickups, authenticated=True, session_expired=True)
+
+    async def _async_fetch_account(self, pickups: list[dict[str, Any]]) -> VafabMiljoData:
+
         # The real app calls this periodically to extend the session. It does
         # *not* fix a stuck 202 "waiting" endpoint (tested directly against
         # the backend: still 202 twenty seconds after a successful call) -
         # keep it only for its own documented purpose, not as a workaround.
         try:
             await self.client.keep_alive()
-        except VafabMiljoAuthError as err:
-            raise ConfigEntryAuthFailed("The VafabMiljö BankID session expired") from err
+        except VafabMiljoAuthError:
+            raise
         except VafabMiljoError as err:
             _LOGGER.warning("Failed to keep the BankID session alive: %s", err)
 
@@ -160,8 +173,8 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         # its own data is discarded here, only the side effect matters.
         try:
             await self.client.get_customer()
-        except VafabMiljoAuthError as err:
-            raise ConfigEntryAuthFailed("The VafabMiljö BankID session expired") from err
+        except VafabMiljoAuthError:
+            raise
         except VafabMiljoError as err:
             _LOGGER.warning("Failed to fetch customer record: %s", err)
 
@@ -199,10 +212,10 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         """
         try:
             return await fetch()
-        except VafabMiljoAuthError as err:
+        except VafabMiljoAuthError:
             # The BankID session expired - this affects every authenticated
-            # endpoint equally, so it's worth surfacing as a real reauth.
-            raise ConfigEntryAuthFailed("The VafabMiljö BankID session expired") from err
+            # endpoint equally, so it's handled once in _async_update_data.
+            raise
         except VafabMiljoError as err:
             _LOGGER.warning("Failed to fetch %s: %s", name, err)
             return None

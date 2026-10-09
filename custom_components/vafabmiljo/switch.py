@@ -49,8 +49,14 @@ class VafabMiljoNotificationSwitch(SwitchEntity, RestoreEntity):
         )
         self._attr_is_on = True  # matches the backend's own default for a new device
 
+    @property
+    def available(self) -> bool:
+        # the backend rejects settings changes while the BankID session is expired
+        return not self._coordinator.data.session_expired
+
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self.async_on_remove(self._coordinator.async_add_listener(self.async_write_ha_state))
         if (last_state := await self.async_get_last_state()) is not None:
             self._attr_is_on = last_state.state == "on"
 

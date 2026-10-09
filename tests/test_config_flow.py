@@ -19,8 +19,8 @@ from vafabmiljo.api import VafabMiljoAuthError, VafabMiljoError
 from vafabmiljo.config_flow import (
     VafabMiljoConfigFlow,
     VafabMiljoOptionsFlow,
-    _is_authenticated,
     _qr_markdown,
+    is_authenticated,
 )
 
 
@@ -432,8 +432,8 @@ async def test_options_flow_saves_scan_interval():
 
 
 def test_is_authenticated_handles_both_shapes():
-    assert _is_authenticated({"status": "authenticated successfully"}) is True
-    assert _is_authenticated({"status": {"code": "BANKID_MSG"}}) is False
+    assert is_authenticated({"status": "authenticated successfully"}) is True
+    assert is_authenticated({"status": {"code": "BANKID_MSG"}}) is False
 
 
 def test_qr_markdown_produces_data_uri():

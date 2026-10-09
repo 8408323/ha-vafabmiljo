@@ -50,7 +50,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _qr_markdown(svg: str) -> str:
+def qr_data_uri(svg: str) -> str:
     # BankID's QR SVG draws only black modules with no background rect, which
     # renders as transparent (showing HA's own theme through it, dark or
     # light) unless we give it one ourselves. The SVG's viewBox has a negative
@@ -65,15 +65,18 @@ def _qr_markdown(svg: str) -> str:
         else:
             rect = '<rect width="100%" height="100%" fill="#ffffff"/>'
         svg = svg.replace(">", f">{rect}", 1)
-    encoded = base64.b64encode(svg.encode()).decode()
-    return f"![BankID QR code](data:image/svg+xml;base64,{encoded})"
+    return f"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}"
 
 
-def _is_authenticated(status: dict[str, Any]) -> bool:
+def _qr_markdown(svg: str) -> str:
+    return f"![BankID QR code]({qr_data_uri(svg)})"
+
+
+def is_authenticated(status: dict[str, Any]) -> bool:
     return status.get("status") == "authenticated successfully"
 
 
-def _bankid_failure_hint(status: dict[str, Any]) -> str | None:
+def bankid_failure_hint(status: dict[str, Any]) -> str | None:
     """BankID's own terminal-failure signal (QR expired unscanned, cancelled, etc.).
 
     Distinct from our own outer poll timeout - this lets a dead QR get reported
@@ -146,12 +149,12 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             assert self._client is not None
             await self._client.set_address(self._selected["plant_id"])
-            if not user_input.get("enable_bankid", True):
+            if not user_input.get("enable_bankid", False):
                 return self._create_entry()
             auth = await self._client.start_bankid_auth()
             self._qr_svg = auth.get("qr", "")
             return await self.async_step_bankid_wait()
-        schema = vol.Schema({vol.Optional("enable_bankid", default=True): bool})
+        schema = vol.Schema({vol.Optional("enable_bankid", default=False): bool})
         return self.async_show_form(step_id="bankid_start", data_schema=schema)
 
     async def async_step_bankid_wait(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -177,9 +180,9 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         while True:
             await asyncio.sleep(BANKID_POLL_INTERVAL)
             status = await self._client.poll_bankid_status()
-            if _is_authenticated(status):
+            if is_authenticated(status):
                 return status
-            if hint := _bankid_failure_hint(status):
+            if hint := bankid_failure_hint(status):
                 self._bankid_qr_expired = True
                 raise VafabMiljoTimeoutError(f"BankID reported: {hint}")
             if status.get("qr"):

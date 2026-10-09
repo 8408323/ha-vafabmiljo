@@ -45,7 +45,8 @@ async def test_setup_entry_creates_coordinator_and_forwards_platforms(monkeypatc
     # anonymous entry: no BankID, no invoices, no notifier
     assert entry.runtime_data.invoice_notifier is None
     hass.config_entries.async_forward_entry_setups.assert_awaited_once()
-    assert len(entry._unload_callbacks) == 1
+    assert len(entry._unload_callbacks) == 3  # panel login + reminders + update listener
+    entry._unload_callbacks[0]()  # cancelling a login when none runs is a no-op
 
 
 async def test_setup_entry_creates_notifier_for_authenticated_entry(monkeypatch):
@@ -63,8 +64,8 @@ async def test_setup_entry_creates_notifier_for_authenticated_entry(monkeypatch)
     notifier = entry.runtime_data.invoice_notifier
     assert notifier is not None
     # unload is wired through the entry's own hooks (update listener + notifier)
-    assert len(entry._unload_callbacks) == 2
-    assert entry._unload_callbacks[0] == notifier.async_unload
+    assert len(entry._unload_callbacks) == 4  # panel login + reminders + invoice notifier + update listener
+    assert entry._unload_callbacks[2] == notifier.async_unload
 
 
 async def test_reload_entry_calls_hass_reload():
@@ -87,6 +88,17 @@ async def test_unload_entry_delegates_to_hass():
     hass.config_entries.async_unload_platforms.assert_awaited_once()
 
 
+async def test_failed_platform_unload_keeps_the_panel(monkeypatch):
+    import vafabmiljo
+
+    removed = []
+    monkeypatch.setattr(vafabmiljo, "async_unregister_panel", lambda hass, eid: removed.append(eid))
+    hass = _hass()
+    hass.config_entries.async_unload_platforms.return_value = False
+    assert await async_unload_entry(hass, _entry()) is False
+    assert removed == []
+
+
 async def test_setup_failure_after_notifier_tears_it_down(monkeypatch):
     from vafabmiljo.coordinator import VafabMiljoData
 
@@ -106,6 +118,7 @@ async def test_setup_failure_after_notifier_tears_it_down(monkeypatch):
     coordinator = entry.runtime_data
     assert coordinator.invoice_notifier is None
     assert coordinator._listeners == []  # notifier's listener was removed
+    assert hass.bus.listeners == []  # and the reminders' event listeners
 
 
 async def test_notifier_setup_failure_tears_it_down(monkeypatch):

@@ -28,3 +28,6 @@ plan.md
 
 # dotclaude runtime lock (never commit)
 .claude/scheduled_tasks.lock
+
+# Frontend
+frontend/node_modules/

@@ -85,7 +85,9 @@ class VafabMiljoClient:
                 async with self._session.request(
                     method, url, headers=self._headers(), json=json, params=params
                 ) as resp:
-                    if resp.status == 401:
+                    # An expired BankID session answers 403 on /services/* (seen live: every account
+                    # endpoint 403 until a fresh BankID login, then 200 again), so 403 counts too.
+                    if resp.status in (401, 403):
                         raise VafabMiljoAuthError(f"{path} rejected the current credentials")
                     if resp.status not in (200, 202):
                         raise VafabMiljoError(f"{path} returned HTTP {resp.status}")
@@ -213,7 +215,7 @@ class VafabMiljoClient:
         """
         url = f"{API_BASE}/services/invoice"
         async with self._session.post(url, headers=self._headers(), json={"invoiceId": invoice_id}) as resp:
-            if resp.status == 401:
+            if resp.status in (401, 403):
                 raise VafabMiljoAuthError("invoice download rejected the current credentials")
             if resp.status != 200:
                 raise VafabMiljoError(f"invoice download returned HTTP {resp.status}")

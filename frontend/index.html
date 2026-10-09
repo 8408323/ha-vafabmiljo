@@ -1,0 +1,37 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VafabMiljö panel preview</title>
+<style>body{margin:0;background:#111;--primary-background-color:#111;--card-background-color:#1c1c1c;--primary-text-color:#e1e1e1;--secondary-text-color:#9b9b9b;--primary-color:#03a9f4;color-scheme:dark}</style>
+</head><body><vafabmiljo-panel id="p"></vafabmiljo-panel>
+<script type="module">
+import "/src/main.tsx";
+import mock from "/dev/mock.json";
+// ?in=0 shifts the mock pickups so the first one is today (0), tomorrow (1), ...
+const q = new URLSearchParams(location.search), shift = q.get("in");
+if (shift != null) {
+  const base = new Date(); base.setDate(base.getDate() + Number(shift));
+  const first = Math.min(...Object.values(mock.states).filter((s) => s.attributes.device_class === "date").map((s) => Date.parse(s.state)));
+  for (const s of Object.values(mock.states)) if (s.attributes.device_class === "date")
+    s.state = new Date(base.getTime() + Date.parse(s.state) - first).toISOString().slice(0, 10);
+}
+// ?due=2 makes only the 3rd bin due tomorrow (the others in a week), to check a mixed row
+const due = q.get("due");
+if (due != null) Object.values(mock.states).filter((s) => s.attributes.device_class === "date").forEach((s, i) => {
+  const d = new Date(); d.setDate(d.getDate() + (i === Number(due) ? 1 : 7)); s.state = d.toISOString().slice(0, 10);
+});
+const p = document.getElementById("p");
+p.narrow = innerWidth < 600;
+// notify recipients live in memory here; the real panel talks to reminders.py
+let recipients = [{ service: "mobile_app_jonathans_iphone", pickup: true, pickup_days_before: 1, pickup_time: "18:00", new_invoice: true, invoice_due: true }];
+// fake BankID login: waiting with a QR for ~6 s, then done
+let loginAt = 0;
+const qr = "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7 7"><rect width="7" height="7" fill="#fff"/><path d="M0 0h3v3H0zM4 0h3v3H4zM0 4h3v3H0zM4 4h1v1H4zM6 6h1v1H6z"/></svg>');
+const connection = { sendMessagePromise: async (msg) => {
+  if (msg.type === "vafabmiljo/login/start") loginAt = Date.now();
+  if (msg.type.startsWith("vafabmiljo/login/"))
+    return Date.now() - loginAt < 6000 ? { status: "waiting", qr, autostart: "bankid:///?autostarttoken=x&redirect=null" } : { status: "done" };
+  if (msg.type === "vafabmiljo/notify/set") recipients = msg.recipients;
+  return { recipients, services: ["mobile_app_jonathans_iphone", "mobile_app_sofias_pixel", "persistent_notification"] };
+} };
+p.hass = { language: q.get("lang") || "sv", ...mock, connection, user: { is_admin: true },
+  callService: async (...a) => { console.log("callService", ...a); return { response: { path: "about:blank" } }; } };
+</script></body></html>

@@ -15,7 +15,7 @@
         }
       },
       "bankid_start": {
-        "description": "Anslut valfritt ditt konto via BankID för att även få fakturor och avtalsdetaljer.",
+        "description": "Valfritt: anslut även ditt VafabMiljö-konto för att få fakturor och avgifter. Du kan hoppa över detta och göra det senare i VafabMiljö-panelen i sidomenyn (Inställningar → Logga in med BankID).",
         "data": {
           "enable_bankid": "Anslut med BankID"
         }
@@ -100,6 +100,11 @@
       },
       "invoice_reminder_time": {
         "name": "Påminnelsetid faktura"
+      }
+    },
+    "calendar": {
+      "pickups": {
+        "name": "Tömningar"
       }
     }
   },

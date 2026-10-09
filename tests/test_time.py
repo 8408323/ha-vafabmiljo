@@ -139,3 +139,15 @@ async def test_invoice_reminder_time_publishes_state_even_if_scheduling_raises()
     # Whatever the notifier settled on must reach the entity, or the UI would
     # keep showing a value that storage no longer holds.
     entity.async_write_ha_state.assert_called_once()
+
+
+async def test_reminder_time_unavailable_while_the_session_is_expired():
+    coordinator = _coordinator(authenticated=True)
+    entity = VafabMiljoReminderTimeEntity(coordinator, _entry())
+    await entity.async_added_to_hass()
+    listener = coordinator.async_add_listener.call_args.args[0]
+    assert entity.available is True
+    coordinator.data.session_expired = True
+    assert entity.available is False
+    listener()
+    assert entity.state_writes == 1

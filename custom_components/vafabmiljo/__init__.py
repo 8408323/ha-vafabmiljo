@@ -11,9 +11,12 @@ from .api import VafabMiljoClient
 from .const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE
 from .coordinator import VafabMiljoCoordinator
 from .invoices import VafabMiljoInvoiceNotifier, async_remove_invoice_store
+from .login import async_cancel_login
+from .panel import async_register_panel, async_unregister_panel
+from .reminders import VafabMiljoNotifier, async_setup_websocket, store_for
 from .services import async_setup_services
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH, Platform.TIME]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.CALENDAR, Platform.SENSOR, Platform.SWITCH, Platform.TIME]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -31,6 +34,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # away, and an automation reacting to that event may call this service.
     # Registration is idempotent across entries.
     async_setup_services(hass)
+    await async_register_panel(hass, entry.entry_id)
+    async_setup_websocket(hass)
+    entry.async_on_unload(lambda: async_cancel_login(hass, entry.entry_id))
+    # Per-recipient notifications configured in the panel (reminders.py).
+    coordinator.reminders = VafabMiljoNotifier(hass, entry, coordinator)
+    entry.async_on_unload(coordinator.reminders.async_unload)
     if coordinator.data.authenticated:
         # Event-based new-invoice / due-reminder delivery (see invoices.py).
         # Only for BankID-connected entries: an anonymous one never sees an
@@ -41,6 +50,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.invoice_notifier = notifier
         entry.async_on_unload(notifier.async_unload)
     try:
+        # Before the invoice notifier, so it already listens when that one's first check fires an event.
+        await coordinator.reminders.async_setup()
         if coordinator.invoice_notifier is not None:
             await coordinator.invoice_notifier.async_setup()
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -49,6 +60,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # HA only runs on_unload callbacks for its own ConfigEntry* exceptions;
         # on any other failure the notifier (listener + timer) would leak and a
         # retried setup would create a second one on the same store.
+        coordinator.reminders.async_unload()
+        async_unregister_panel(hass, entry.entry_id)
         if coordinator.invoice_notifier is not None:
             coordinator.invoice_notifier.async_unload()
             coordinator.invoice_notifier = None
@@ -63,10 +76,13 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    # The invoice notifier is unloaded through entry.async_on_unload (see setup).
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    # The invoice notifier, reminders and a running panel login are unloaded through entry.async_on_unload.
+    if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        async_unregister_panel(hass, entry.entry_id)
+    return unloaded
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Drop the per-entry persisted invoice state when the entry is deleted."""
     await async_remove_invoice_store(hass, entry)
+    await store_for(hass, entry).async_remove()

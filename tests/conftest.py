@@ -32,6 +32,7 @@ def _install_stub_homeassistant() -> None:
 
     class Platform(str, enum.Enum):
         BINARY_SENSOR = "binary_sensor"
+        CALENDAR = "calendar"
         SENSOR = "sensor"
         SWITCH = "switch"
         TIME = "time"
@@ -84,8 +85,19 @@ def _install_stub_homeassistant() -> None:
         def __init__(self) -> None:
             self.fired: list[tuple[str, dict[str, Any]]] = []
 
+            self.listeners: list[tuple[str, Any]] = []
+
         def async_fire(self, event_type: str, event_data: dict[str, Any] | None = None) -> None:
             self.fired.append((event_type, event_data or {}))
+
+        def async_listen(self, event_type: str, listener):
+            item = (event_type, listener)
+            self.listeners.append(item)
+            return lambda: self.listeners.remove(item)
+
+    class Event:
+        def __init__(self, event_type: str, data: dict[str, Any] | None = None) -> None:
+            self.event_type, self.data = event_type, data or {}
 
     class CoreState(str, enum.Enum):
         not_running = "NOT_RUNNING"
@@ -101,10 +113,20 @@ def _install_stub_homeassistant() -> None:
             self.state = CoreState.running
             # callbacks registered via helpers.start.async_at_started while not running
             self.started_callbacks: list[Any] = []
-            self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts))
+            self.config = types.SimpleNamespace(path=lambda *parts: os.path.join("/config", *parts), language="sv")
+            self.time_listeners: list[Any] = []
             self.scheduled_jobs: list[Any] = []
             # (action, when) pairs registered via async_track_point_in_time
             self.scheduled_timers: list[tuple[Any, Any]] = []
+            self.static_paths: list[Any] = []
+
+            async def _register_static_paths(configs) -> None:
+                self.static_paths.extend(configs)
+
+            self.http = types.SimpleNamespace(async_register_static_paths=_register_static_paths)
+            # entity ids per domain, for hass.states.async_entity_ids
+            self.entity_ids: dict[str, list[str]] = {}
+            self.states = types.SimpleNamespace(async_entity_ids=lambda domain: list(self.entity_ids.get(domain, [])))
 
         def async_create_task(self, coro, name=None):
             return asyncio.ensure_future(coro)
@@ -116,6 +138,7 @@ def _install_stub_homeassistant() -> None:
         return func
 
     core.HomeAssistant = HomeAssistant
+    core.Event = Event
     core.CoreState = CoreState
     core.callback = callback
     core.ServiceCall = ServiceCall
@@ -144,11 +167,15 @@ def _install_stub_homeassistant() -> None:
             self.data = data or {}
             self.options = options or {}
             self.entry_id = "test_entry"
+            self.domain = "vafabmiljo"
             self.runtime_data: Any = None
             self._unload_callbacks: list = []
 
         def async_on_unload(self, func) -> None:
             self._unload_callbacks.append(func)
+
+        def async_start_reauth(self, hass) -> None:
+            self.reauth_started = getattr(self, "reauth_started", 0) + 1
 
         def add_update_listener(self, func):
             return func
@@ -335,6 +362,12 @@ def _install_stub_homeassistant() -> None:
 
         return _unsub
 
+    def async_track_time_change(hass, action, hour=None, minute=None, second=None):
+        item = (action, (hour, minute, second))
+        hass.time_listeners.append(item)
+        return lambda: hass.time_listeners.remove(item)
+
+    event_mod.async_track_time_change = async_track_time_change
     event_mod.async_call_later = async_call_later
     event_mod.async_track_point_in_time = async_track_point_in_time
     sys.modules["homeassistant.helpers.event"] = event_mod
@@ -385,6 +418,12 @@ def _install_stub_homeassistant() -> None:
     class RestoreEntity:
         async def async_added_to_hass(self) -> None:
             return None
+
+        def async_on_remove(self, func) -> None:
+            self.__dict__.setdefault("_on_remove", []).append(func)
+
+        def async_write_ha_state(self) -> None:
+            self.__dict__["state_writes"] = self.__dict__.get("state_writes", 0) + 1
 
         async def async_get_last_state(self):
             return None
@@ -478,6 +517,70 @@ def _install_stub_homeassistant() -> None:
 
     time_mod.TimeEntity = TimeEntity
     sys.modules["homeassistant.components.time"] = time_mod
+
+    calendar_mod = types.ModuleType("homeassistant.components.calendar")
+
+    class CalendarEvent:
+        def __init__(self, *, start, end, summary: str) -> None:
+            self.start, self.end, self.summary = start, end, summary
+
+    class CalendarEntity:
+        pass
+
+    calendar_mod.CalendarEvent = CalendarEvent
+    calendar_mod.CalendarEntity = CalendarEntity
+    sys.modules["homeassistant.components.calendar"] = calendar_mod
+
+    # The panel registration only records what it was asked to register.
+    http_mod = types.ModuleType("homeassistant.components.http")
+
+    class StaticPathConfig:
+        def __init__(self, url_path: str, path: str, cache_headers: bool = True) -> None:
+            self.url_path, self.path, self.cache_headers = url_path, path, cache_headers
+
+    http_mod.StaticPathConfig = StaticPathConfig
+    sys.modules["homeassistant.components.http"] = http_mod
+
+    panel_custom_mod = types.ModuleType("homeassistant.components.panel_custom")
+    panel_custom_mod.panels = []
+
+    async def async_register_panel(hass, **kwargs) -> None:
+        panel_custom_mod.panels.append(kwargs)
+
+    panel_custom_mod.async_register_panel = async_register_panel
+    components.panel_custom = panel_custom_mod
+    sys.modules["homeassistant.components.panel_custom"] = panel_custom_mod
+
+    websocket_mod = types.ModuleType("homeassistant.components.websocket_api")
+    websocket_mod.registered = []
+
+    def websocket_command(schema):
+        def wrap(func):
+            func.schema = schema
+            return func
+
+        return wrap
+
+    def _passthrough(func):
+        func.admin = getattr(func, "admin", False)
+        return func
+
+    def require_admin(func):
+        func.admin = True
+        return func
+
+    websocket_mod.websocket_command = websocket_command
+    websocket_mod.require_admin = require_admin
+    websocket_mod.async_response = _passthrough
+    websocket_mod.async_register_command = lambda hass, cmd: websocket_mod.registered.append(cmd)
+    components.websocket_api = websocket_mod
+    sys.modules["homeassistant.components.websocket_api"] = websocket_mod
+
+    frontend_mod = types.ModuleType("homeassistant.components.frontend")
+    frontend_mod.removed = []
+    frontend_mod.async_remove_panel = lambda hass, url_path: frontend_mod.removed.append(url_path)
+    components.frontend = frontend_mod
+    sys.modules["homeassistant.components.frontend"] = frontend_mod
 
     diagnostics_mod = types.ModuleType("homeassistant.components.diagnostics")
     REDACTED = "**REDACTED**"

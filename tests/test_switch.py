@@ -60,3 +60,15 @@ async def test_restores_last_state_on_add_to_hass():
     await switch.async_added_to_hass()
 
     assert switch.is_on is False
+
+
+async def test_unavailable_while_the_session_is_expired_and_follows_the_coordinator():
+    coordinator = _coordinator(authenticated=True)
+    entity = VafabMiljoNotificationSwitch(coordinator, _entry(), "garbage", "garbage")
+    await entity.async_added_to_hass()
+    listener = coordinator.async_add_listener.call_args.args[0]
+    assert entity.available is True
+    coordinator.data.session_expired = True
+    assert entity.available is False
+    listener()  # a coordinator update rewrites the state
+    assert entity.state_writes == 1
