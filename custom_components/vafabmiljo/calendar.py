@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_PLANT_ID
 from .coordinator import VafabMiljoCoordinator
@@ -43,7 +44,7 @@ class VafabMiljoPickupCalendar(CoordinatorEntity[VafabMiljoCoordinator], Calenda
 
     @property
     def event(self) -> CalendarEvent | None:
-        today = date.today()
+        today = dt_util.now().date()  # HA's timezone, not the host's
         return next((e for e in self._events() if e.start >= today), None)
 
     async def async_get_events(

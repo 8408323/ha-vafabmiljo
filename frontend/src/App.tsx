@@ -19,8 +19,12 @@ const PAID = new Set(["helt betald"]);  // same as const.PAID_STATUSES
 const fmt = (v: number | null | undefined, d = 0, u = "") =>
   v == null || Number.isNaN(v) ? "–" : `${v.toLocaleString("sv-SE", { minimumFractionDigits: d, maximumFractionDigits: d })}${u ? " " + u : ""}`;
 const day = (iso: string) => new Date(iso.slice(0, 10) + "T00:00:00");
-const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
-const daysUntil = (iso: string) => Math.round((day(iso).getTime() - today().getTime()) / 864e5);
+// "today" in Home Assistant's timezone, not the browser's (someone checking the panel while travelling);
+// set from hass.config.time_zone on every render
+let haTz: string | undefined;
+const todayIso = () => new Date().toLocaleDateString("sv-SE", { timeZone: haTz });  // sv-SE formats as YYYY-MM-DD
+const utc = (iso: string) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
+const daysUntil = (iso: string) => Math.round((utc(iso) - utc(todayIso())) / 864e5);
 
 export function addresses(hass: any): Addr[] {
   const by: Record<string, Addr> = {};
@@ -65,6 +69,7 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
   const [lang, setLangState] = useState<string | null>(() => localStorage.getItem("vm_lang"));
   const setLang = (x: string | null) => { setLangState(x); x ? localStorage.setItem("vm_lang", x) : localStorage.removeItem("vm_lang"); };
   const { t, locale } = pick(hass.locale?.language ?? hass.language, lang);
+  haTz = hass.config?.time_zone;
   const [tab, setTab] = useState<Tab>(() => (localStorage.getItem("vm_tab") as Tab) || "overview");
   const [sel, setSel] = useState<string | null>(() => localStorage.getItem("vm_addr"));
   const list = addresses(hass);

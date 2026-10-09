@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
 from .const import CONF_ADDRESS, CONF_CITY, CONF_PLANT_ID, CONF_SESSION_COOKIE, DOMAIN
@@ -83,7 +84,8 @@ class VafabMiljoPickupTomorrowBinarySensor(CoordinatorEntity[VafabMiljoCoordinat
     def is_on(self) -> bool:
         if not self.coordinator.data.pickups:
             return False
-        tomorrow = date.today() + timedelta(days=1)
+        # HA's timezone, not the host's (a UTC container would change day two hours late)
+        tomorrow = dt_util.now().date() + timedelta(days=1)
         for bin_info in self.coordinator.data.pickups[0].get("bins", []):
             if bin_info["type"] == self._bin_type:
                 return date.fromisoformat(bin_info["pickup_date"]) == tomorrow

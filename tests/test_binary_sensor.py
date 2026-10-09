@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from unittest.mock import Mock
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.util import dt as dt_util
 from vafabmiljo.binary_sensor import (
     VafabMiljoConnectedBinarySensor,
     VafabMiljoPickupTomorrowBinarySensor,
@@ -13,8 +14,8 @@ from vafabmiljo.binary_sensor import (
 )
 from vafabmiljo.coordinator import VafabMiljoData
 
-TOMORROW = date.today() + timedelta(days=1)
-TODAY = date.today()
+TOMORROW = dt_util.now().date() + timedelta(days=1)
+TODAY = dt_util.now().date()
 
 
 def _entry(**data) -> ConfigEntry:

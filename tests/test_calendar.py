@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from unittest.mock import Mock
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.util import dt as dt_util
 from vafabmiljo.calendar import VafabMiljoPickupCalendar, async_setup_entry
 from vafabmiljo.coordinator import VafabMiljoData
 
-TODAY = date.today()
+TODAY = dt_util.now().date()
 
 
 def _calendar(bins: list[dict]) -> VafabMiljoPickupCalendar:
@@ -48,3 +49,14 @@ async def test_get_events_returns_only_the_requested_window():
     start = datetime.combine(TODAY, datetime.min.time())
     events = await cal.async_get_events(None, start, start + timedelta(days=7))
     assert [e.summary for e in events] == ["Restavfall"]
+
+
+def test_today_comes_from_home_assistants_timezone(monkeypatch):
+    # 00:30 on the 19th in Stockholm is still the 18th in UTC: the 18th's pickup must already be over
+    from datetime import timezone
+
+    monkeypatch.setattr(dt_util, "NOW_OVERRIDE", datetime(2026, 10, 19, 0, 30, tzinfo=timezone(timedelta(hours=2))))
+    cal = _calendar(
+        [{"type": "Restavfall", "pickup_date": "2026-10-18"}, {"type": "Matavfall", "pickup_date": "2026-10-19"}]
+    )
+    assert cal.event.summary == "Matavfall"
