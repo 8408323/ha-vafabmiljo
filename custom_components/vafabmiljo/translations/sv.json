@@ -119,5 +119,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "bankid_expired": {
+      "title": "VafabMiljö: logga in med BankID igen",
+      "description": "BankID-inloggningen för **{address}** har gått ut, så fakturor och avgifter uppdateras inte längre (tömningsdatum gör det fortfarande). Öppna VafabMiljö-panelen (Läs mer), gå till **Inställningar → Konto** och klicka **Logga in igen**."
+    }
   }
 }

@@ -5,11 +5,12 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import VafabMiljoClient
-from .const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE
-from .coordinator import VafabMiljoCoordinator
+from .const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE, DOMAIN
+from .coordinator import VafabMiljoCoordinator, bankid_issue_id
 from .invoices import VafabMiljoInvoiceNotifier, async_remove_invoice_store
 from .login import async_cancel_login
 from .panel import async_register_panel, async_unregister_panel
@@ -79,6 +80,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # The invoice notifier, reminders and a running panel login are unloaded through entry.async_on_unload.
     if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         async_unregister_panel(hass, entry.entry_id)
+        # nothing polls a disabled entry, so its repair would never clear; setup recreates it if still expired
+        ir.async_delete_issue(hass, DOMAIN, bankid_issue_id(entry.entry_id))
     return unloaded
 
 
@@ -86,3 +89,4 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Drop the per-entry persisted invoice state when the entry is deleted."""
     await async_remove_invoice_store(hass, entry)
     await store_for(hass, entry).async_remove()
+    ir.async_delete_issue(hass, DOMAIN, bankid_issue_id(entry.entry_id))

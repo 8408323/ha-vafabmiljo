@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import VafabMiljoAuthError, VafabMiljoClient, VafabMiljoError
@@ -47,6 +48,10 @@ def _as_invoice_id(value: Any) -> int | None:
                 # decodes ids read back from storage, during entry setup.
                 return None
     return None
+
+
+def bankid_issue_id(entry_id: str) -> str:
+    return f"bankid_expired_{entry_id}"
 
 
 @dataclass
@@ -146,13 +151,27 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
             return VafabMiljoData(pickups=pickups, authenticated=False)
 
         try:
-            return await self._async_fetch_account(pickups)
+            data = await self._async_fetch_account(pickups)
         except VafabMiljoAuthError:
             # The pickup calendar needs no login, so keep it going instead of failing the whole
             # refresh (ConfigEntryAuthFailed would make every entity unavailable); ask HA for a new
-            # BankID login and let the panel / notifier tell the user.
+            # BankID login, raise a repair that links to the panel, and let the notifier tell the user.
             self.entry.async_start_reauth(self.hass)
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                bankid_issue_id(self.entry.entry_id),
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,  # account data has already stopped updating
+                translation_key="bankid_expired",
+                translation_placeholders={"address": self.entry.title},
+                # the panel, where Settings -> Log in again fixes it; homeassistant:// navigates inside the
+                # current frontend (a plain path opens a new tab, an external browser in the companion app)
+                learn_more_url="homeassistant://vafabmiljo",
+            )
             return VafabMiljoData(pickups=pickups, authenticated=True, session_expired=True)
+        ir.async_delete_issue(self.hass, DOMAIN, bankid_issue_id(self.entry.entry_id))
+        return data
 
     async def _async_fetch_account(self, pickups: list[dict[str, Any]]) -> VafabMiljoData:
 

@@ -80,6 +80,11 @@ async def _assert_expired_keeps_pickups(client):
     assert data.pickups and data.authenticated and data.session_expired
     assert data.invoices is None
     assert coordinator.entry.reauth_started == 1
+    # a repair in Settings -> Repairs, linking to the panel
+    issue = coordinator.hass.data["_issues"][("vafabmiljo", "bankid_expired_test_entry")]
+    assert issue["learn_more_url"] == "homeassistant://vafabmiljo"
+    assert issue["severity"] == "error"
+    assert issue["translation_placeholders"] == {"address": "Testgatan 1, Teststad"}
 
 
 async def test_expired_session_triggers_reauth():
@@ -211,3 +216,11 @@ def test_as_invoice_id_rejects_malformed_values_without_raising():
     # Past sys.int_max_str_digits int() raises; a corrupt stored id must not
     # abort entry setup.
     assert _as_invoice_id("1" * 5000) is None
+
+
+async def test_a_working_login_clears_the_repair():
+    client = _authenticated_client()
+    coordinator = _make_coordinator(client)
+    coordinator.hass.data["_issues"] = {("vafabmiljo", "bankid_expired_test_entry"): {}}
+    await coordinator._async_update_data()
+    assert coordinator.hass.data["_issues"] == {}
