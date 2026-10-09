@@ -57,7 +57,7 @@ class VafabMiljoConnectedBinarySensor(CoordinatorEntity[VafabMiljoCoordinator], 
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator.data.authenticated
+        return self.coordinator.data.authenticated and not self.coordinator.data.session_expired
 
 
 class VafabMiljoPickupTomorrowBinarySensor(CoordinatorEntity[VafabMiljoCoordinator], BinarySensorEntity):

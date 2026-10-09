@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 import pytest
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from vafabmiljo.api import VafabMiljoAuthError, VafabMiljoError
 from vafabmiljo.coordinator import VafabMiljoCoordinator, VafabMiljoData
@@ -73,14 +72,21 @@ async def test_orders_and_complaints_fetched_only_when_available():
     assert data.available_complaints == [{"description": "Utebliven hämtning"}]
 
 
+async def _assert_expired_keeps_pickups(client):
+    client.list_next_pickup.return_value = [{"bins": [{"type": "Restavfall", "pickup_date": "2026-10-19"}]}]
+    coordinator = _make_coordinator(client)
+    data = await coordinator._async_update_data()
+    # the pickup calendar keeps working; HA is asked for a new BankID login
+    assert data.pickups and data.authenticated and data.session_expired
+    assert data.invoices is None
+    assert coordinator.entry.reauth_started == 1
+
+
 async def test_expired_session_triggers_reauth():
     client = AsyncMock()
     client.session_cookie = "abc123"
-    client.list_next_pickup.return_value = []
     client.get_invoices.side_effect = VafabMiljoAuthError("expired")
-
-    with pytest.raises(ConfigEntryAuthFailed):
-        await _make_coordinator(client)._async_update_data()
+    await _assert_expired_keeps_pickups(client)
 
 
 async def test_keep_alive_called_before_account_data(caplog):
@@ -104,9 +110,7 @@ async def test_keep_alive_failure_is_tolerated(caplog):
 
 async def test_keep_alive_auth_error_triggers_reauth():
     client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
-
-    with pytest.raises(ConfigEntryAuthFailed):
-        await _make_coordinator(client)._async_update_data()
+    await _assert_expired_keeps_pickups(client)
 
 
 async def test_get_customer_called_before_account_data(caplog):
@@ -130,9 +134,7 @@ async def test_get_customer_failure_is_tolerated(caplog):
 
 async def test_get_customer_auth_error_triggers_reauth():
     client = _authenticated_client(get_customer=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
-
-    with pytest.raises(ConfigEntryAuthFailed):
-        await _make_coordinator(client)._async_update_data()
+    await _assert_expired_keeps_pickups(client)
 
 
 async def test_authenticated_account_fetch_failure_is_tolerated(caplog):

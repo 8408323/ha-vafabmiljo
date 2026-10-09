@@ -3,6 +3,7 @@
 Each recipient picks which messages it gets and when:
 - pickup reminder: the evening before (or the same morning) at its own time, listing the bins
 - new invoice / invoice due tomorrow: sent when this entry fires its own invoice events (invoices.py)
+- BankID login expired: once per expiry, when the backend starts rejecting the session
 
 Off by default (no recipients), so it never doubles up with automations built on the events. Recipients
 live in their own Store rather than in the entry options: an options change reloads the whole entry.
@@ -37,6 +38,8 @@ _TEXT = {
         "new_invoice": "Ny faktura: {amount} kr",
         "invoice_due": "Faktura förfaller imorgon: {amount} kr",
         "invoice": "{address}, förfaller {due}, OCR {ocr}",
+        "expired": "VafabMiljö: inloggningen har gått ut",
+        "expired_msg": "Fakturor och avgifter uppdateras inte. Logga in med BankID igen i VafabMiljö-panelen.",
     },
     "en": {
         "pickup": "Pickup {when}: {bins}",
@@ -46,6 +49,8 @@ _TEXT = {
         "new_invoice": "New invoice: {amount} kr",
         "invoice_due": "Invoice due tomorrow: {amount} kr",
         "invoice": "{address}, due {due}, OCR {ocr}",
+        "expired": "VafabMiljö: login expired",
+        "expired_msg": "Invoices and fees are no longer updated. Log in with BankID again in the VafabMiljö panel.",
     },
 }
 DEFAULT_RECIPIENT = {
@@ -54,6 +59,7 @@ DEFAULT_RECIPIENT = {
     "pickup_time": "18:00",
     "new_invoice": True,
     "invoice_due": True,
+    "session_expired": True,
 }
 
 
@@ -92,12 +98,27 @@ class VafabMiljoNotifier:
         self.recipients: list[dict[str, Any]] = []
         self._unsubs: list[Any] = []
         self._timers: list[Any] = []
+        self._expired = False  # whether the current expiry was already announced
 
     async def async_setup(self) -> None:
         self.recipients = clean_recipients(await self._store.async_load())
         for event_type in (EVENT_NEW_INVOICE, EVENT_INVOICE_DUE_REMINDER):
             self._unsubs.append(self._hass.bus.async_listen(event_type, self._on_invoice_event))
+        self._unsubs.append(self._coordinator.async_add_listener(self._on_update))
         self._schedule()
+
+    @callback
+    def _on_update(self) -> None:
+        expired = bool(self._coordinator.data and self._coordinator.data.session_expired)
+        if expired and not self._expired:
+            t = self._text
+            self._hass.async_create_task(self._send_all("session_expired", t["expired"], t["expired_msg"]))
+        self._expired = expired
+
+    async def _send_all(self, key: str, title: str, message: str) -> None:
+        for rec in self.recipients:
+            if rec[key]:
+                await self._send(rec["service"], title, message)
 
     @callback
     def async_unload(self) -> None:
@@ -144,9 +165,7 @@ class VafabMiljoNotifier:
         message = t["invoice"].format(
             address=self._entry.data[CONF_ADDRESS], due=data.get("due_date"), ocr=data.get("ocr_number")
         )
-        for rec in self.recipients:
-            if rec[key]:
-                await self._send(rec["service"], title, message)
+        await self._send_all(key, title, message)
 
     @property
     def _text(self) -> dict[str, str]:

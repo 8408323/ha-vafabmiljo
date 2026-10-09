@@ -46,10 +46,10 @@ that anymore).
 2. Search for and select your address. This works anonymously and immediately gives you
    next-pickup-date sensors, per-bin-type "X tomorrow" binary sensors, and a
    Notification time entity - none of this needs BankID.
-3. Optionally connect your account via BankID (scan the QR shown in the setup dialog) to
-   also get invoice, waste-contract, and notification-preference entities (matching the
-   app's own "Driftinformation"/"Avfallstömning"/"Nyheter" toggles and reminder-time
-   picker), plus a diagnostic "BankID connected" sensor.
+3. Setup asks whether to connect BankID too; you can skip it. Everything account-related
+   (invoices with PDFs, contract fees, property, the app's notification switches) appears
+   once you log in with BankID, which you can do any time from the **VafabMiljö** panel in
+   the sidebar - see [Authentication](#authentication).
 4. Have more than one VafabMiljö property/address? Just repeat setup for each one - a
    second entry for a different address is fine. Adding the *same* address twice is
    blocked. Moved, or picked the wrong address? Reconfigure the entry (⋮ → Reconfigure)
@@ -99,19 +99,38 @@ data (`?in=0` / `?in=1` shifts the pickups to today / tomorrow, `?due=2` makes o
 
 ## Authentication
 
-Account data uses **Swedish BankID** (same as the app). During setup, a QR code is shown
-in the HA config flow - scan it with the BankID app on your phone. It's a live snapshot,
-not a rotating one (HA has no supported way to update it mid-task without risking [a core
-bug](https://github.com/home-assistant/core/issues/95749)), and expires in about
-25-30 seconds if unscanned - if that happens, just submit the form again for a fresh one.
+Account data uses **Swedish BankID**, same as the app. Log in from the panel:
 
-BankID sessions expire after a period of inactivity; when that happens the integration
-triggers HA's usual reauth flow (needs another QR scan).
+1. Open **VafabMiljö** in the sidebar → **Settings** → **Account (BankID)**.
+2. Click **Log in with BankID** (or **Log in again**). A dialog shows a QR code.
+3. Scan it with the BankID app. On a phone, tap **Open BankID on this device** instead.
+4. When BankID confirms, the dialog says you're logged in and the integration reloads
+   with your invoices, fees and property. The QR rotates while you wait; if it expires
+   (about 30 seconds) just click **Try again**.
+
+Only Home Assistant administrators can start a login. You can also connect BankID in the
+setup dialog when adding the integration, but the panel is the easier way.
+
+**When the login expires.** BankID sessions expire after a while. The integration then:
+
+- keeps the pickup sensors, calendar and pickup reminders working (they need no login),
+- shows **Login expired** on the panel's Account card and turns the *BankID connected*
+  sensor off,
+- starts Home Assistant's own reauthentication prompt (Settings → Devices & services),
+- sends a one-time **"Login expired"** notification to every recipient that has it turned
+  on (see below).
+
+Log in again from the panel and everything comes back on the next refresh.
 
 ## HA-side notifications, dashboard, and automations
 
-This integration doesn't send any notification or control anything itself - it
-provides the building blocks and your own automations decide what to do with them:
+The simplest way is the panel: **Settings → Notifications from Home Assistant → Add
+recipient**. Pick a phone (any `notify` service) and choose, per recipient, the pickup
+reminder (the evening before or the same morning, at its own time), new invoices,
+invoice-due reminders and login-expired alerts. Nothing is sent until you add a recipient.
+
+If you prefer your own automations, the integration also provides the building blocks
+(don't use both for the same message, or you'll get it twice):
 
 - **Pickup reminders**: the per-bin-type binary sensors ("Matavfall tomorrow", etc.)
   and the **Notification time** entity (local to HA, independent of BankID and of the

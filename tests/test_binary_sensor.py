@@ -94,3 +94,9 @@ def test_pickup_tomorrow_is_off_when_no_pickups_at_all():
     entry = _entry()
     sensor = VafabMiljoPickupTomorrowBinarySensor(_coordinator(authenticated=False, pickups=[]), entry, "Matavfall")
     assert sensor.is_on is False
+
+
+def test_connected_sensor_is_off_while_the_session_is_expired():
+    coordinator = _coordinator(authenticated=True)
+    coordinator.data.session_expired = True
+    assert VafabMiljoConnectedBinarySensor(coordinator, _entry(session_cookie="abc123")).is_on is False

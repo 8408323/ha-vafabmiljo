@@ -269,10 +269,9 @@ function Account({ a, hass, t }: { a: Addr; hass: any; t: T }) {
   const [login, setLogin] = useState<Login | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const admin = hass.user?.is_admin !== false;
-  // The session cookie can be present but rejected by the backend; then the account data stays empty.
+  // The "BankID connected" sensor exists once BankID was ever set up, and is off while the backend rejects the session.
   const connected = a.bankid?.state === "on";
-  const dataOk = !!a.invoice && !["unknown", "unavailable"].includes(a.invoice.state);
-  const [cls, text] = !connected ? ["", t.bankid_none] : dataOk ? ["pos", t.bankid_ok] : ["warn", t.bankid_expired];
+  const [cls, text] = !a.bankid ? ["", t.bankid_none] : connected ? ["pos", t.bankid_ok] : ["warn", t.bankid_expired];
 
   const send = (type: string) => hass.connection.sendMessagePromise({ type, entry_id: a.entryId });
   useEffect(() => {
@@ -317,8 +316,8 @@ function Account({ a, hass, t }: { a: Addr; hass: any; t: T }) {
 }
 
 /* ---------------- Notification recipients ---------------- */
-type Recipient = { service: string; pickup: boolean; pickup_days_before: 0 | 1; pickup_time: string; new_invoice: boolean; invoice_due: boolean };
-const NEW: Omit<Recipient, "service"> = { pickup: true, pickup_days_before: 1, pickup_time: "18:00", new_invoice: true, invoice_due: true };
+type Recipient = { service: string; pickup: boolean; pickup_days_before: 0 | 1; pickup_time: string; new_invoice: boolean; invoice_due: boolean; session_expired: boolean };
+const NEW: Omit<Recipient, "service"> = { pickup: true, pickup_days_before: 1, pickup_time: "18:00", new_invoice: true, invoice_due: true, session_expired: true };
 
 // "mobile_app_jonathans_iphone" -> "Jonathans iphone"; the HA app's own device name when we can find it
 function serviceName(hass: any, service: string) {
@@ -349,7 +348,7 @@ function Recipients({ a, hass, t }: { a: Addr; hass: any; t: T }) {
   };
   const summary = (r: Recipient) => [
     r.pickup && `${t.pickup_reminder}: ${(r.pickup_days_before ? t.evening_before : t.same_morning).toLowerCase()} ${t.at} ${r.pickup_time}`,
-    r.new_invoice && t.new_invoice, r.invoice_due && t.invoice_due,
+    r.new_invoice && t.new_invoice, r.invoice_due && t.invoice_due, r.session_expired && t.session_expired,
   ].filter(Boolean).join(" · ");
 
   return (
@@ -418,6 +417,10 @@ function RecipientModal({ t, hass, init, services, onClose, onSave, onRemove }:
         <label className="row">
           <span>{t.invoice_due}</span>
           <input type="checkbox" className="toggle" checked={r.invoice_due} onChange={(e) => set({ invoice_due: e.target.checked })} />
+        </label>
+        <label className="row">
+          <span>{t.session_expired}</span>
+          <input type="checkbox" className="toggle" checked={r.session_expired} onChange={(e) => set({ session_expired: e.target.checked })} />
         </label>
         <div className="modal-actions">
           {onRemove && <button className="btn danger" onClick={onRemove}>{t.remove}</button>}

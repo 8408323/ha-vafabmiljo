@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -55,6 +56,7 @@ def test_clean_recipients_fills_defaults_and_drops_junk():
             "pickup_time": "18:00",
             "new_invoice": True,
             "invoice_due": True,
+            "session_expired": True,
         },
         {
             "service": "mobile_app_b",
@@ -63,6 +65,7 @@ def test_clean_recipients_fills_defaults_and_drops_junk():
             "pickup_time": "06:30",
             "new_invoice": True,
             "invoice_due": True,
+            "session_expired": True,
         },
     ]
     assert clean_recipients(None) == []
@@ -167,3 +170,14 @@ def test_websocket_commands_register_once():
     async_setup_websocket(hass)
     async_setup_websocket(hass)
     assert websocket_api.registered[:2] == [ws_get, ws_set] and len(websocket_api.registered) == 5
+
+
+async def test_expired_login_is_announced_once_per_expiry():
+    hass, _, notifier = _setup()
+    await notifier.async_set([{"service": "a"}, {"service": "b", "session_expired": False}])
+    data = notifier._coordinator.data
+    for expired in (True, True, False, True):  # two polls while expired, then fixed, then expired again
+        data.session_expired = expired
+        notifier._on_update()
+        await asyncio.sleep(0)
+    assert _sent(hass) == [("a", "VafabMiljö: inloggningen har gått ut")] * 2

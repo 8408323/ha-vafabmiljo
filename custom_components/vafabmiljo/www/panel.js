@@ -9899,6 +9899,7 @@ var ce = {
 			at: "kl.",
 			new_invoice: "Ny faktura",
 			invoice_due: "Faktura förfaller imorgon",
+			session_expired: "Inloggningen har gått ut",
 			save: "Spara",
 			cancel: "Avbryt",
 			remove: "Ta bort",
@@ -9965,6 +9966,7 @@ var ce = {
 			at: "kl.",
 			new_invoice: "Ny faktura",
 			invoice_due: "Faktura forfaller i morgen",
+			session_expired: "Innloggingen har utløpt",
 			save: "Lagre",
 			cancel: "Avbryt",
 			remove: "Fjern",
@@ -10031,6 +10033,7 @@ var ce = {
 			at: "kl.",
 			new_invoice: "Ny faktura",
 			invoice_due: "Faktura forfalder i morgen",
+			session_expired: "Login er udløbet",
 			save: "Gem",
 			cancel: "Annuller",
 			remove: "Fjern",
@@ -10097,6 +10100,7 @@ var ce = {
 			at: "klo",
 			new_invoice: "Uusi lasku",
 			invoice_due: "Lasku erääntyy huomenna",
+			session_expired: "Kirjautuminen vanhentunut",
 			save: "Tallenna",
 			cancel: "Peruuta",
 			remove: "Poista",
@@ -10163,6 +10167,7 @@ var ce = {
 			at: "kl.",
 			new_invoice: "Nýr reikningur",
 			invoice_due: "Reikningur á gjalddaga á morgun",
+			session_expired: "Innskráning útrunnin",
 			save: "Vista",
 			cancel: "Hætta við",
 			remove: "Fjarlægja",
@@ -10229,6 +10234,7 @@ var ce = {
 			at: "at",
 			new_invoice: "New invoice",
 			invoice_due: "Invoice due tomorrow",
+			session_expired: "Login expired",
 			save: "Save",
 			cancel: "Cancel",
 			remove: "Remove",
@@ -10643,33 +10649,33 @@ function Se({ a: e, hass: t, t: n, lang: r, setLang: i }) {
 	});
 }
 function Ce({ a: e, hass: t, t: n }) {
-	let [r, i] = (0, d.useState)(null), [a, o] = (0, d.useState)(null), s = t.user?.is_admin !== !1, c = e.bankid?.state === "on", l = !!e.invoice && !["unknown", "unavailable"].includes(e.invoice.state), [u, f] = c ? l ? ["pos", n.bankid_ok] : ["warn", n.bankid_expired] : ["", n.bankid_none], m = (n) => t.connection.sendMessagePromise({
+	let [r, i] = (0, d.useState)(null), [a, o] = (0, d.useState)(null), s = t.user?.is_admin !== !1, c = e.bankid?.state === "on", [l, u] = e.bankid ? c ? ["pos", n.bankid_ok] : ["warn", n.bankid_expired] : ["", n.bankid_none], f = (n) => t.connection.sendMessagePromise({
 		type: n,
 		entry_id: e.entryId
 	});
 	(0, d.useEffect)(() => {
 		if (r?.status !== "waiting") return;
-		let e = setInterval(() => m("vafabmiljo/login/status").then(i).catch(() => void 0), 2e3);
+		let e = setInterval(() => f("vafabmiljo/login/status").then(i).catch(() => void 0), 2e3);
 		return () => clearInterval(e);
 	}, [r?.status]);
-	let h = async () => {
+	let m = async () => {
 		o(null);
 		try {
-			i(await m("vafabmiljo/login/start"));
+			i(await f("vafabmiljo/login/start"));
 		} catch (e) {
 			o(e?.message ?? String(e));
 		}
-	}, g = () => {
-		r?.status === "waiting" && m("vafabmiljo/login/cancel").catch(() => void 0), i(null);
+	}, h = () => {
+		r?.status === "waiting" && f("vafabmiljo/login/cancel").catch(() => void 0), i(null);
 	};
 	return /* @__PURE__ */ (0, p.jsxs)("div", {
 		className: "card",
 		children: [
 			/* @__PURE__ */ (0, p.jsx)("h2", { children: n.account }),
 			/* @__PURE__ */ (0, p.jsx)("div", {
-				className: `muted ${u}`,
+				className: `muted ${l}`,
 				style: { margin: "6px 0" },
-				children: f
+				children: u
 			}),
 			a && /* @__PURE__ */ (0, p.jsx)("div", {
 				className: "neg",
@@ -10678,7 +10684,7 @@ function Ce({ a: e, hass: t, t: n }) {
 			s ? /* @__PURE__ */ (0, p.jsx)("button", {
 				className: "btn primary",
 				disabled: !e.entryId,
-				onClick: h,
+				onClick: m,
 				children: c ? n.relogin : n.login
 			}) : /* @__PURE__ */ (0, p.jsx)("div", {
 				className: "muted",
@@ -10686,7 +10692,7 @@ function Ce({ a: e, hass: t, t: n }) {
 			}),
 			r && /* @__PURE__ */ (0, p.jsx)("div", {
 				className: "modal-bg",
-				onPointerDown: (e) => e.target === e.currentTarget && g(),
+				onPointerDown: (e) => e.target === e.currentTarget && h(),
 				children: /* @__PURE__ */ (0, p.jsxs)("div", {
 					className: "modal card login",
 					role: "dialog",
@@ -10724,12 +10730,12 @@ function Ce({ a: e, hass: t, t: n }) {
 								/* @__PURE__ */ (0, p.jsx)("span", { style: { flex: 1 } }),
 								r.status === "failed" && /* @__PURE__ */ (0, p.jsx)("button", {
 									className: "btn",
-									onClick: h,
+									onClick: m,
 									children: n.relogin
 								}),
 								/* @__PURE__ */ (0, p.jsx)("button", {
 									className: "btn",
-									onClick: g,
+									onClick: h,
 									children: r.status === "done" ? "OK" : n.cancel
 								})
 							]
@@ -10745,7 +10751,8 @@ var we = {
 	pickup_days_before: 1,
 	pickup_time: "18:00",
 	new_invoice: !0,
-	invoice_due: !0
+	invoice_due: !0,
+	session_expired: !0
 };
 function Te(e, t) {
 	let n = t.replace(/^mobile_app_/, ""), r = Object.values(e.devices ?? {}).find((e) => (e.name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_") === n), i = r?.name_by_user || r?.name || n.replace(/_/g, " ");
@@ -10775,7 +10782,8 @@ function Ee({ a: e, hass: t, t: n }) {
 	}, h = (e) => [
 		e.pickup && `${n.pickup_reminder}: ${(e.pickup_days_before ? n.evening_before : n.same_morning).toLowerCase()} ${n.at} ${e.pickup_time}`,
 		e.new_invoice && n.new_invoice,
-		e.invoice_due && n.invoice_due
+		e.invoice_due && n.invoice_due,
+		e.session_expired && n.session_expired
 	].filter(Boolean).join(" · ");
 	return /* @__PURE__ */ (0, p.jsxs)("div", {
 		className: "card",
@@ -10913,6 +10921,15 @@ function w({ t: e, hass: t, init: n, services: r, onClose: i, onSave: a, onRemov
 						className: "toggle",
 						checked: s.invoice_due,
 						onChange: (e) => l({ invoice_due: e.target.checked })
+					})]
+				}),
+				/* @__PURE__ */ (0, p.jsxs)("label", {
+					className: "row",
+					children: [/* @__PURE__ */ (0, p.jsx)("span", { children: e.session_expired }), /* @__PURE__ */ (0, p.jsx)("input", {
+						type: "checkbox",
+						className: "toggle",
+						checked: s.session_expired,
+						onChange: (e) => l({ session_expired: e.target.checked })
 					})]
 				}),
 				/* @__PURE__ */ (0, p.jsxs)("div", {

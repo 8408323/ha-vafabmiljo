@@ -46,9 +46,10 @@ async def test_register_sends_expected_body(client: VafabMiljoClient):
         assert request.kwargs["headers"]["authorization"] == "Bearer bearer-token-value"
 
 
-async def test_401_raises_auth_error(client: VafabMiljoClient):
+@pytest.mark.parametrize("status", [401, 403])
+async def test_401_and_403_raise_auth_error(client: VafabMiljoClient, status: int):
     with aioresponses() as mocked:
-        mocked.get(f"{API_BASE}/services/invoices", status=401)
+        mocked.get(f"{API_BASE}/services/invoices", status=status)
         with pytest.raises(VafabMiljoAuthError):
             await client.get_invoices()
 

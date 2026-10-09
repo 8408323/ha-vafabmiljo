@@ -171,6 +171,9 @@ def _install_stub_homeassistant() -> None:
         def async_on_unload(self, func) -> None:
             self._unload_callbacks.append(func)
 
+        def async_start_reauth(self, hass) -> None:
+            self.reauth_started = getattr(self, "reauth_started", 0) + 1
+
         def add_update_listener(self, func):
             return func
 
