@@ -82,7 +82,8 @@ async def _assert_expired_keeps_pickups(client):
     assert coordinator.entry.reauth_started == 1
     # a repair in Settings -> Repairs, linking to the panel
     issue = coordinator.hass.data["_issues"][("vafabmiljo", "bankid_expired_test_entry")]
-    assert issue["learn_more_url"] == "/vafabmiljo"
+    assert issue["learn_more_url"] == "homeassistant://vafabmiljo"
+    assert issue["severity"] == "error"
     assert issue["translation_placeholders"] == {"address": "Testgatan 1, Teststad"}
 
 

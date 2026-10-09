@@ -162,10 +162,12 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
                 DOMAIN,
                 bankid_issue_id(self.entry.entry_id),
                 is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
+                severity=ir.IssueSeverity.ERROR,  # account data has already stopped updating
                 translation_key="bankid_expired",
                 translation_placeholders={"address": self.entry.title},
-                learn_more_url="/vafabmiljo",  # the panel, where Settings -> Log in again fixes it
+                # the panel, where Settings -> Log in again fixes it; homeassistant:// navigates inside the
+                # current frontend (a plain path opens a new tab, an external browser in the companion app)
+                learn_more_url="homeassistant://vafabmiljo",
             )
             return VafabMiljoData(pickups=pickups, authenticated=True, session_expired=True)
         ir.async_delete_issue(self.hass, DOMAIN, bankid_issue_id(self.entry.entry_id))

@@ -80,6 +80,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # The invoice notifier, reminders and a running panel login are unloaded through entry.async_on_unload.
     if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         async_unregister_panel(hass, entry.entry_id)
+        # nothing polls a disabled entry, so its repair would never clear; setup recreates it if still expired
+        ir.async_delete_issue(hass, DOMAIN, bankid_issue_id(entry.entry_id))
     return unloaded
 
 

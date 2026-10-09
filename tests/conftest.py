@@ -397,6 +397,7 @@ def _install_stub_homeassistant() -> None:
 
     class IssueSeverity(str, enum.Enum):
         WARNING = "warning"
+        ERROR = "error"
 
     def async_create_issue(hass, domain, issue_id, **kwargs) -> None:
         hass.data.setdefault("_issues", {})[(domain, issue_id)] = kwargs

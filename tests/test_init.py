@@ -82,10 +82,12 @@ async def test_unload_entry_delegates_to_hass():
     hass.config_entries.async_unload_platforms.return_value = True
     entry = _entry()
 
+    hass.data["_issues"] = {("vafabmiljo", "bankid_expired_test_entry"): {}}
     result = await async_unload_entry(hass, entry)
 
     assert result is True
     hass.config_entries.async_unload_platforms.assert_awaited_once()
+    assert hass.data["_issues"] == {}  # a disabled entry can't clear its repair later
 
 
 async def test_failed_platform_unload_keeps_the_panel(monkeypatch):

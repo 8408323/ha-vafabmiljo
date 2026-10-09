@@ -118,7 +118,7 @@ setup dialog when adding the integration, but the panel is the easier way.
   sensor off,
 - starts Home Assistant's own reauthentication prompt (Settings → Devices & services),
 - adds a **Settings → Repairs** entry whose *Learn more* link opens the VafabMiljö panel; it
-  disappears by itself once you've logged in again,
+  disappears by itself once you've logged in again (or the integration is disabled),
 - sends a one-time **"Login expired"** notification to every recipient that has it turned
   on (see below).
 
