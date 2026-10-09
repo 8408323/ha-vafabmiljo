@@ -21,16 +21,17 @@ if (due != null) Object.values(mock.states).filter((s) => s.attributes.device_cl
 const p = document.getElementById("p");
 p.narrow = innerWidth < 600;
 // notify recipients live in memory here; the real panel talks to reminders.py
-let recipients = [{ service: "mobile_app_jonathans_iphone", pickup: true, pickup_days_before: 1, pickup_time: "18:00", new_invoice: true, invoice_due: true }];
+let recipients = [{ service: "mobile_app_annas_iphone", pickup: true, pickup_days_before: 1, pickup_time: "18:00", new_invoice: true, invoice_due: true }];
 // fake BankID login: waiting with a QR for ~6 s, then done
 let loginAt = 0;
 const qr = "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7 7"><rect width="7" height="7" fill="#fff"/><path d="M0 0h3v3H0zM4 0h3v3H4zM0 4h3v3H0zM4 4h1v1H4zM6 6h1v1H6z"/></svg>');
 const connection = { sendMessagePromise: async (msg) => {
+  if (msg.type === "config_entries/get") return [{ entry_id: "entry1", title: "Exempelgatan 1, Exempelstad", state: "loaded" }];
   if (msg.type === "vafabmiljo/login/start") loginAt = Date.now();
   if (msg.type.startsWith("vafabmiljo/login/"))
     return Date.now() - loginAt < 6000 ? { status: "waiting", qr, autostart: "bankid:///?autostarttoken=x&redirect=null" } : { status: "done" };
   if (msg.type === "vafabmiljo/notify/set") recipients = msg.recipients;
-  return { recipients, services: ["mobile_app_jonathans_iphone", "mobile_app_sofias_pixel", "persistent_notification"] };
+  return { recipients, services: ["mobile_app_annas_iphone", "mobile_app_eriks_pixel", "persistent_notification"] };
 } };
 p.hass = { language: q.get("lang") || "sv", ...mock, connection, user: { is_admin: true },
   callService: async (...a) => { console.log("callService", ...a); return { response: { path: "about:blank" } }; } };
