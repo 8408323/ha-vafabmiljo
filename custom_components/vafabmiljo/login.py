@@ -59,8 +59,10 @@ class PanelLogin:
                     self._hass.config_entries.async_update_entry(
                         self._entry, data={**self._entry.data, CONF_SESSION_COOKIE: self._client.session_cookie}
                     )
+                    # the entry's update listener reloads it; a pending reauth flow (started when the
+                    # session expired) is now answered, and finishing it later could overwrite this cookie
                     self.status = "done"
-                    self._hass.config_entries.async_schedule_reload(self._entry.entry_id)
+                    self._abort_reauth()
                     return
                 if hint := bankid_failure_hint(state):
                     self.status, self.hint = "failed", hint
@@ -70,6 +72,13 @@ class PanelLogin:
             self.status, self.hint = "failed", "timeout"
         except VafabMiljoError as err:
             self.status, self.hint = "failed", str(err)
+
+    def _abort_reauth(self) -> None:
+        flows = self._hass.config_entries.flow.async_progress_by_handler(
+            DOMAIN, match_context={"source": "reauth", "entry_id": self._entry.entry_id}
+        )
+        for flow in flows:
+            self._hass.config_entries.flow.async_abort(flow["flow_id"])
 
     def cancel(self) -> None:
         if self.task is not None and not self.task.done():

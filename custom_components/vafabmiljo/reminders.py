@@ -23,7 +23,7 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 
-from .const import CONF_ADDRESS, DOMAIN, EVENT_INVOICE_DUE_REMINDER, EVENT_NEW_INVOICE
+from .const import CONF_ADDRESS, CONF_SESSION_COOKIE, DOMAIN, EVENT_INVOICE_DUE_REMINDER, EVENT_NEW_INVOICE
 from .coordinator import VafabMiljoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -98,23 +98,39 @@ class VafabMiljoNotifier:
         self.recipients: list[dict[str, Any]] = []
         self._unsubs: list[Any] = []
         self._timers: list[Any] = []
-        self._expired = False  # whether the current expiry was already announced
+        # cookie whose expiry was already announced (persisted, so a restart doesn't announce it again)
+        self._announced_cookie: str | None = None
+        self._unsub_coordinator: Any = None
 
     async def async_setup(self) -> None:
-        self.recipients = clean_recipients(await self._store.async_load())
+        stored = await self._store.async_load()
+        # stored as {"recipients": [...], "expired_cookie": ...}; the first 0.4.0 builds saved the bare list
+        if isinstance(stored, dict):
+            self.recipients = clean_recipients(stored.get("recipients"))
+            self._announced_cookie = stored.get("expired_cookie")
+        else:
+            self.recipients = clean_recipients(stored)
         for event_type in (EVENT_NEW_INVOICE, EVENT_INVOICE_DUE_REMINDER):
             self._unsubs.append(self._hass.bus.async_listen(event_type, self._on_invoice_event))
-        self._unsubs.append(self._coordinator.async_add_listener(self._on_update))
         self._schedule()
         self._on_update()  # the first refresh (before this listener existed) may already have found it expired
 
     @callback
     def _on_update(self) -> None:
-        expired = bool(self._coordinator.data and self._coordinator.data.session_expired)
-        if expired and not self._expired:
-            t = self._text
-            self._hass.async_create_task(self._send_all("session_expired", t["expired"], t["expired_msg"]))
-        self._expired = expired
+        if not (self._coordinator.data and self._coordinator.data.session_expired):
+            return
+        cookie = self._entry.data.get(CONF_SESSION_COOKIE)
+        if cookie != self._announced_cookie:  # once per rejected session, across restarts
+            self._announced_cookie = cookie
+            self._hass.async_create_task(self._announce_expired())
+
+    async def _announce_expired(self) -> None:
+        await self._save()
+        t = self._text
+        await self._send_all("session_expired", t["expired"], t["expired_msg"])
+
+    async def _save(self) -> None:
+        await self._store.async_save({"recipients": self.recipients, "expired_cookie": self._announced_cookie})
 
     async def _send_all(self, key: str, title: str, message: str) -> None:
         for rec in self.recipients:
@@ -123,19 +139,27 @@ class VafabMiljoNotifier:
 
     @callback
     def async_unload(self) -> None:
-        for unsub in self._unsubs + self._timers:
+        for unsub in self._unsubs + self._timers + [self._unsub_coordinator or (lambda: None)]:
             unsub()
-        self._unsubs, self._timers = [], []
+        self._unsubs, self._timers, self._unsub_coordinator = [], [], None
 
     async def async_set(self, recipients: Any) -> list[dict[str, Any]]:
         self.recipients = clean_recipients(recipients)
-        await self._store.async_save(self.recipients)
+        await self._save()
         self._schedule()
         return self.recipients
 
     def _schedule(self) -> None:
         for unsub in self._timers:
             unsub()
+        # Only listen to the coordinator when someone wants the expiry alert: a listener keeps the
+        # cloud polling alive even when every entity is disabled. (Pickup reminders read the data on time.)
+        wants_expiry = any(r["session_expired"] for r in self.recipients)
+        if wants_expiry and self._unsub_coordinator is None:
+            self._unsub_coordinator = self._coordinator.async_add_listener(self._on_update)
+        elif not wants_expiry and self._unsub_coordinator is not None:
+            self._unsub_coordinator()
+            self._unsub_coordinator = None
         times = {r["pickup_time"] for r in self.recipients if r["pickup"]}
         self._timers = [
             async_track_time_change(self._hass, self._on_time, hour=int(t[:2]), minute=int(t[3:]), second=0)
@@ -198,6 +222,7 @@ def _notifier(hass: HomeAssistant, entry_id: str) -> VafabMiljoNotifier | None:
 
 
 @websocket_api.websocket_command({vol.Required("type"): "vafabmiljo/notify/get", vol.Required("entry_id"): str})
+@websocket_api.require_admin  # lists every notify target (phones, people) in the house
 @callback
 def ws_get(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
     notifier = _notifier(hass, msg["entry_id"])

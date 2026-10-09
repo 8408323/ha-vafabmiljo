@@ -419,6 +419,12 @@ def _install_stub_homeassistant() -> None:
         async def async_added_to_hass(self) -> None:
             return None
 
+        def async_on_remove(self, func) -> None:
+            self.__dict__.setdefault("_on_remove", []).append(func)
+
+        def async_write_ha_state(self) -> None:
+            self.__dict__["state_writes"] = self.__dict__.get("state_writes", 0) + 1
+
         async def async_get_last_state(self):
             return None
 

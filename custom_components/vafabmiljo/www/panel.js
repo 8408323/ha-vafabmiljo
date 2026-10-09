@@ -10761,7 +10761,7 @@ function w(e, t) {
 function T({ a: e, hass: t, t: n }) {
 	let [r, i] = (0, d.useState)(null), [a, o] = (0, d.useState)([]), [s, c] = (0, d.useState)(null), [l, u] = (0, d.useState)(null), f = t.user?.is_admin !== !1;
 	(0, d.useEffect)(() => {
-		e.entryId && t.connection.sendMessagePromise({
+		e.entryId && f && t.connection.sendMessagePromise({
 			type: "vafabmiljo/notify/get",
 			entry_id: e.entryId
 		}).then((e) => {

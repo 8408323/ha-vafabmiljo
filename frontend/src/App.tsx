@@ -342,7 +342,7 @@ function Recipients({ a, hass, t }: { a: Addr; hass: any; t: T }) {
   const admin = hass.user?.is_admin !== false;
 
   useEffect(() => {
-    if (!a.entryId) return;
+    if (!a.entryId || !admin) return;  // the recipient list (people's phones) is admin-only
     hass.connection.sendMessagePromise({ type: "vafabmiljo/notify/get", entry_id: a.entryId })
       .then((r: any) => { setList(r.recipients); setServices(r.services); }).catch((e: any) => setErr(e?.message ?? String(e)));
   }, [a.entryId]);

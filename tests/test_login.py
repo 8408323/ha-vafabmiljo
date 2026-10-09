@@ -28,13 +28,20 @@ def setup(monkeypatch):
     hass.data["test_session"] = object()
     hass.async_create_background_task = lambda coro, name: asyncio.ensure_future(coro)
     entry = ConfigEntry(data={"device_uuid": "d", "device_bearer": "b", "session_cookie": "old"})
-    updates, reloads = [], []
+    updates, aborted = [], []
+    reauth = [{"flow_id": "f1", "context": {"source": "reauth", "entry_id": entry.entry_id}}]
+    flow = SimpleNamespace(
+        async_progress_by_handler=lambda domain, match_context: [
+            f for f in reauth if all(f["context"].get(k) == v for k, v in match_context.items())
+        ],
+        async_abort=aborted.append,
+    )
     hass.config_entries = SimpleNamespace(
         async_get_entry=lambda eid: entry if eid == entry.entry_id else None,
         async_update_entry=lambda e, data: updates.append(data),
-        async_schedule_reload=reloads.append,
+        flow=flow,
     )
-    return SimpleNamespace(hass=hass, entry=entry, client=client, updates=updates, reloads=reloads, conn=Mock())
+    return SimpleNamespace(hass=hass, entry=entry, client=client, updates=updates, aborted=aborted, conn=Mock())
 
 
 def _result(s):
@@ -53,7 +60,8 @@ async def test_login_saves_the_cookie_and_reloads(setup):
     ws_status(s.hass, s.conn, {"id": 2, "entry_id": s.entry.entry_id})
     assert _result(s)["status"] == "done" and _result(s)["qr"] is None
     assert s.updates == [{**s.entry.data, "session_cookie": "new-cookie"}]
-    assert s.reloads == [s.entry.entry_id]
+    # the update listener does the reload; the pending reauth flow is closed
+    assert s.aborted == ["f1"]
 
 
 async def test_bankid_failure_and_api_error_and_timeout(setup, monkeypatch):

@@ -157,7 +157,7 @@ async def test_websocket_get_and_set():
 
     await ws_set(hass, conn, {"id": 2, "entry_id": entry.entry_id, "recipients": [{"service": "mobile_app_a"}]})
     assert conn.send_result.call_args.args[1]["recipients"][0]["service"] == "mobile_app_a"
-    assert ws_set.admin is True
+    assert ws_set.admin is True and ws_get.admin is True
 
     ws_get(hass, conn, {"id": 3, "entry_id": "nope"})
     await ws_set(hass, conn, {"id": 4, "entry_id": "nope", "recipients": []})
@@ -172,15 +172,42 @@ def test_websocket_commands_register_once():
     assert websocket_api.registered[:2] == [ws_get, ws_set] and len(websocket_api.registered) == 5
 
 
-async def test_expired_login_is_announced_once_per_expiry():
-    hass, _, notifier = _setup()
+async def test_expired_login_is_announced_once_per_session_even_across_restarts():
+    hass, entry, notifier = _setup()
+    entry.data["session_cookie"] = "c1"
     await notifier.async_set([{"service": "a"}, {"service": "b", "session_expired": False}])
     data = notifier._coordinator.data
-    for expired in (True, True, False, True):  # two polls while expired, then fixed, then expired again
+
+    async def poll(expired):
         data.session_expired = expired
         notifier._on_update()
         await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    await poll(True)
+    await poll(True)  # still the same rejected session
+    await poll(False)
+    # a restart while still expired: a new notifier reads the marker back
+    again = VafabMiljoNotifier(hass, entry, notifier._coordinator)
+    await again.async_setup()
+    await asyncio.sleep(0)
+    entry.data["session_cookie"] = "c2"  # logged in again, and that session expired too
+    await poll(True)
     assert _sent(hass) == [("a", "VafabMiljö: inloggningen har gått ut")] * 2
+    again.async_unload()
+
+
+async def test_old_list_format_still_loads_and_listener_follows_the_expiry_toggle():
+    hass, entry, notifier = _setup()
+    await notifier._store.async_save([{"service": "a", "session_expired": False}])  # first 0.4.0 format
+    await notifier.async_setup()
+    assert notifier.recipients[0]["service"] == "a"
+    # nobody wants the expiry alert: no coordinator listener (it would keep polling alive)
+    assert notifier._unsub_coordinator is None
+    await notifier.async_set([{"service": "a"}])
+    assert notifier._unsub_coordinator is not None
+    await notifier.async_set([{"service": "a", "session_expired": False}])
+    assert notifier._unsub_coordinator is None
 
 
 async def test_notify_entities_go_through_send_message_and_are_offered():
@@ -199,9 +226,11 @@ async def test_notify_entities_go_through_send_message_and_are_offered():
 
 
 async def test_an_already_expired_session_is_announced_at_setup():
-    hass, _, notifier = _setup()
+    hass, entry, notifier = _setup()
+    entry.data["session_cookie"] = "c1"  # an expired session always has a (rejected) cookie
     await notifier._store.async_save([{"service": "a"}])
     notifier._coordinator.data.session_expired = True
     await notifier.async_setup()
-    await asyncio.sleep(0)
+    for _ in range(3):
+        await asyncio.sleep(0)
     assert _sent(hass) == [("a", "VafabMiljö: inloggningen har gått ut")]

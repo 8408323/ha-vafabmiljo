@@ -61,6 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # on any other failure the notifier (listener + timer) would leak and a
         # retried setup would create a second one on the same store.
         coordinator.reminders.async_unload()
+        async_unregister_panel(hass, entry.entry_id)
         if coordinator.invoice_notifier is not None:
             coordinator.invoice_notifier.async_unload()
             coordinator.invoice_notifier = None
