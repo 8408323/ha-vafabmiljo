@@ -109,15 +109,18 @@ async def ws_start(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) ->
     if (entry := _entry(hass, connection, msg)) is None:
         return
     logins: dict[str, PanelLogin] = hass.data.setdefault(KEY, {})
-    if old := logins.pop(entry.entry_id, None):
-        old.cancel()
-    login = PanelLogin(hass, entry)
-    try:
-        await login.async_start()
-    except VafabMiljoError as err:
-        connection.send_error(msg["id"], "cannot_connect", str(err))
-        return
-    logins[entry.entry_id] = login
+    # one start at a time per entry: a double click must not leave an orphan login polling (which could
+    # later overwrite the cookie) because both awaited the backend before either was stored
+    async with hass.data.setdefault(f"{KEY}_locks", {}).setdefault(entry.entry_id, asyncio.Lock()):
+        if old := logins.pop(entry.entry_id, None):
+            old.cancel()
+        login = PanelLogin(hass, entry)
+        try:
+            await login.async_start()
+        except VafabMiljoError as err:
+            connection.send_error(msg["id"], "cannot_connect", str(err))
+            return
+        logins[entry.entry_id] = login
     connection.send_result(msg["id"], login.as_dict())
 
 

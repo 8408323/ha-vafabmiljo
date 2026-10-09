@@ -126,3 +126,31 @@ async def test_a_finished_login_survives_the_reload_it_triggers(setup):
     async_cancel_login(s.hass, s.entry.entry_id)  # the update listener's reload unloads the entry
     ws_status(s.hass, s.conn, {"id": 2, "entry_id": s.entry.entry_id})
     assert _result(s)["status"] == "done"
+
+
+async def test_concurrent_starts_leave_only_one_login_running(setup):
+    s = setup
+
+    async def pending():
+        await asyncio.sleep(10)
+
+    s.client.poll_bankid_status.side_effect = pending
+    first_started = asyncio.Event()
+
+    async def slow_start():
+        first_started.set()
+        await asyncio.sleep(0.01)
+        return {"qr": "<svg/>", "token": "t"}
+
+    s.client.start_bankid_auth.side_effect = slow_start
+    msg = {"id": 1, "entry_id": s.entry.entry_id}
+    a = asyncio.ensure_future(ws_start(s.hass, s.conn, msg))
+    await first_started.wait()
+    b = asyncio.ensure_future(ws_start(s.hass, s.conn, msg))  # a double click
+    await asyncio.gather(a, b)
+    await asyncio.sleep(0)
+
+    running = s.hass.data[KEY][s.entry.entry_id]
+    tasks = [t for t in asyncio.all_tasks() if t.get_coro().__qualname__ == "PanelLogin._poll" and not t.done()]
+    assert tasks == [running.task]  # the first one was cancelled, none orphaned
+    async_cancel_login(s.hass, s.entry.entry_id)

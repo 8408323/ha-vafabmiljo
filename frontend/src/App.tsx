@@ -26,18 +26,24 @@ const todayIso = () => new Date().toLocaleDateString("sv-SE", { timeZone: haTz }
 const utc = (iso: string) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
 const daysUntil = (iso: string) => Math.round((utc(iso) - utc(todayIso())) / 864e5);
 
-export function addresses(hass: any): Addr[] {
+type Entry = { entry_id: string; title: string; state: string };
+
+// One address per *loaded* config entry (so an entry whose entities are all disabled still shows, and a
+// disabled entry doesn't). entries is null until config_entries/get answered (or when it isn't allowed);
+// then the addresses are derived from the entities' devices instead.
+export function addresses(hass: any, entries: Entry[] | null): Addr[] {
   const by: Record<string, Addr> = {};
+  const blank = (entryId: string | undefined, name: string): Addr =>
+    ({ id: entryId ?? name, entryId, name, pickups: [], fees: [], switches: [], times: [] });
+  for (const en of entries ?? []) if (en.state === "loaded") by[en.entry_id] = blank(en.entry_id, en.title);
   for (const e of Object.values((hass.entities ?? {}) as Record<string, Ent>)) {
-    // the address comes from the registry, so it stays in the panel (login, recipients) even when
-    // all its entities are disabled and have no state
     if (e.platform !== "vafabmiljo" || !e.device_id) continue;
     const s: St | undefined = hass.states[e.entity_id];
     const dev = hass.devices?.[e.device_id];
-    const a = (by[e.device_id] ??= {
-      id: e.device_id, entryId: dev?.primary_config_entry ?? dev?.config_entries?.[0], name: dev?.name_by_user || dev?.name || "VafabMiljö",
-      pickups: [], fees: [], switches: [], times: [],
-    });
+    const entryId: string | undefined = dev?.primary_config_entry ?? dev?.config_entries?.[0];
+    if (entries && !(entryId && by[entryId])) continue;  // entry not loaded
+    const a = entries ? by[entryId!] : (by[e.device_id] ??= blank(entryId, dev?.name_by_user || dev?.name || "VafabMiljö"));
+    if (!entries) a.id = e.device_id;
     if (!s) continue;
     const domain = e.entity_id.split(".")[0];
     if (domain === "sensor" && s.attributes.device_class === "date") a.pickups.push(s);
@@ -75,7 +81,14 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
   haTz = hass.config?.time_zone;
   const [tab, setTab] = useState<Tab>(() => (localStorage.getItem("vm_tab") as Tab) || "overview");
   const [sel, setSel] = useState<string | null>(() => localStorage.getItem("vm_addr"));
-  const list = addresses(hass);
+  const [entries, setEntries] = useState<Entry[] | null>(null);
+  // refetched when the set of VafabMiljö states changes (an entry loaded, unloaded or reloaded)
+  const stateKey = Object.keys(hass.states).filter((k) => hass.entities?.[k]?.platform === "vafabmiljo").length;
+  useEffect(() => {
+    hass.connection.sendMessagePromise({ type: "config_entries/get", domain: "vafabmiljo" })
+      .then((r: Entry[]) => setEntries(r)).catch(() => setEntries(null));
+  }, [stateKey]);
+  const list = addresses(hass, entries);
   const a = list.find((x) => x.id === sel) ?? list[0];
   const ctx = { hass, t, locale };
   const go = (x: Tab) => { setTab(x); localStorage.setItem("vm_tab", x); };
@@ -110,7 +123,8 @@ function Overview({ a, ...ctx }: Ctx & { a: Addr }) {
   const { t, locale } = ctx;
   const bins = a.pickups.map((s) => ({ type: s.attributes.bin_type ?? short(s, a), ...when(s.state, ctx) }));
   const first = Math.min(...bins.map((b) => b.days ?? Infinity));
-  const scene: SceneBin[] = bins.map((b) => ({ ...b, next: b.days === first }));
+  // no known date at all (e.g. VafabMiljö unreachable): nothing is "next"
+  const scene: SceneBin[] = bins.map((b) => ({ ...b, next: Number.isFinite(first) && b.days === first }));
   const next = scene.filter((b) => b.next);
   const tonight = scene.filter((b) => b.days === 1), now = scene.filter((b) => b.days === 0);
   const inv = a.invoice?.attributes.invoices?.[0] as Invoice | undefined;

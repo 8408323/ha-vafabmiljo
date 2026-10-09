@@ -10277,24 +10277,27 @@ var ue = [
 	minimumFractionDigits: t,
 	maximumFractionDigits: t
 })}${n ? " " + n : ""}`, fe = (e) => /* @__PURE__ */ new Date(e.slice(0, 10) + "T00:00:00"), pe, me = () => (/* @__PURE__ */ new Date()).toLocaleDateString("sv-SE", { timeZone: pe }), he = (e) => Date.UTC(+e.slice(0, 4), e.slice(5, 7) - 1, +e.slice(8, 10)), ge = (e) => Math.round((he(e) - he(me())) / 864e5);
-function _e(e) {
-	let t = {};
-	for (let n of Object.values(e.entities ?? {})) {
-		if (n.platform !== "vafabmiljo" || !n.device_id) continue;
-		let r = e.states[n.entity_id], i = e.devices?.[n.device_id], a = t[n.device_id] ??= {
-			id: n.device_id,
-			entryId: i?.primary_config_entry ?? i?.config_entries?.[0],
-			name: i?.name_by_user || i?.name || "VafabMiljö",
-			pickups: [],
-			fees: [],
-			switches: [],
-			times: []
-		};
-		if (!r) continue;
-		let o = n.entity_id.split(".")[0];
-		o === "sensor" && r.attributes.device_class === "date" ? a.pickups.push(r) : n.translation_key === "latest_invoice" ? a.invoice = r : n.translation_key === "property" ? a.property = r : n.translation_key === "bankid_connected" ? a.bankid = r : o === "sensor" && "pickups_per_year" in r.attributes ? a.fees.push(r) : o === "calendar" ? a.calendar = r : o === "switch" ? a.switches.push(r) : o === "time" && a.times.push(r);
+function _e(e, t) {
+	let n = {}, r = (e, t) => ({
+		id: e ?? t,
+		entryId: e,
+		name: t,
+		pickups: [],
+		fees: [],
+		switches: [],
+		times: []
+	});
+	for (let e of t ?? []) e.state === "loaded" && (n[e.entry_id] = r(e.entry_id, e.title));
+	for (let i of Object.values(e.entities ?? {})) {
+		if (i.platform !== "vafabmiljo" || !i.device_id) continue;
+		let a = e.states[i.entity_id], o = e.devices?.[i.device_id], s = o?.primary_config_entry ?? o?.config_entries?.[0];
+		if (t && !(s && n[s])) continue;
+		let c = t ? n[s] : n[i.device_id] ??= r(s, o?.name_by_user || o?.name || "VafabMiljö");
+		if (t || (c.id = i.device_id), !a) continue;
+		let l = i.entity_id.split(".")[0];
+		l === "sensor" && a.attributes.device_class === "date" ? c.pickups.push(a) : i.translation_key === "latest_invoice" ? c.invoice = a : i.translation_key === "property" ? c.property = a : i.translation_key === "bankid_connected" ? c.bankid = a : l === "sensor" && "pickups_per_year" in a.attributes ? c.fees.push(a) : l === "calendar" ? c.calendar = a : l === "switch" ? c.switches.push(a) : l === "time" && c.times.push(a);
 	}
-	return Object.values(t).sort((e, t) => e.name.localeCompare(t.name));
+	return Object.values(n).sort((e, t) => e.name.localeCompare(t.name));
 }
 var ve = (e, t) => {
 	let n = e.attributes.friendly_name ?? e.entity_id;
@@ -10326,49 +10329,56 @@ function be({ hass: e, narrow: t }) {
 		r(e), e ? localStorage.setItem("vm_lang", e) : localStorage.removeItem("vm_lang");
 	}, { t: a, locale: o } = le(e.locale?.language ?? e.language, n);
 	pe = e.config?.time_zone;
-	let [s, c] = (0, d.useState)(() => localStorage.getItem("vm_tab") || "overview"), [l, u] = (0, d.useState)(() => localStorage.getItem("vm_addr")), f = _e(e), m = f.find((e) => e.id === l) ?? f[0], h = {
+	let [s, c] = (0, d.useState)(() => localStorage.getItem("vm_tab") || "overview"), [l, u] = (0, d.useState)(() => localStorage.getItem("vm_addr")), [f, m] = (0, d.useState)(null), h = Object.keys(e.states).filter((t) => e.entities?.[t]?.platform === "vafabmiljo").length;
+	(0, d.useEffect)(() => {
+		e.connection.sendMessagePromise({
+			type: "config_entries/get",
+			domain: "vafabmiljo"
+		}).then((e) => m(e)).catch(() => m(null));
+	}, [h]);
+	let g = _e(e, f), _ = g.find((e) => e.id === l) ?? g[0], v = {
 		hass: e,
 		t: a,
 		locale: o
-	}, g = (e) => {
+	}, y = (e) => {
 		c(e), localStorage.setItem("vm_tab", e);
 	};
 	return /* @__PURE__ */ (0, p.jsxs)("div", {
 		className: `page ${t ? "narrow" : ""}`,
 		children: [/* @__PURE__ */ (0, p.jsxs)("header", { children: [/* @__PURE__ */ (0, p.jsxs)("div", {
 			className: "brand",
-			children: [/* @__PURE__ */ (0, p.jsx)("h1", { children: a.title }), f.length > 1 ? /* @__PURE__ */ (0, p.jsx)("div", {
+			children: [/* @__PURE__ */ (0, p.jsx)("h1", { children: a.title }), g.length > 1 ? /* @__PURE__ */ (0, p.jsx)("div", {
 				className: "seg",
-				children: f.map((e) => /* @__PURE__ */ (0, p.jsx)("button", {
-					className: e.id === m?.id ? "on" : "",
+				children: g.map((e) => /* @__PURE__ */ (0, p.jsx)("button", {
+					className: e.id === _?.id ? "on" : "",
 					onClick: () => {
 						u(e.id), localStorage.setItem("vm_addr", e.id);
 					},
 					children: e.name
 				}, e.id))
-			}) : m && /* @__PURE__ */ (0, p.jsx)("span", {
+			}) : _ && /* @__PURE__ */ (0, p.jsx)("span", {
 				className: "chip",
-				children: m.name
+				children: _.name
 			})]
 		}), /* @__PURE__ */ (0, p.jsx)("nav", {
 			className: "tabs",
 			children: ue.map((e) => /* @__PURE__ */ (0, p.jsx)("button", {
 				className: s === e ? "on" : "",
-				onClick: () => g(e),
+				onClick: () => y(e),
 				children: a[`tab_${e}`]
 			}, e))
-		})] }), m ? /* @__PURE__ */ (0, p.jsxs)(p.Fragment, { children: [
+		})] }), _ ? /* @__PURE__ */ (0, p.jsxs)(p.Fragment, { children: [
 			s === "overview" && /* @__PURE__ */ (0, p.jsx)(xe, {
-				...h,
-				a: m
+				...v,
+				a: _
 			}),
 			s === "invoices" && /* @__PURE__ */ (0, p.jsx)(Ce, {
-				...h,
-				a: m
+				...v,
+				a: _
 			}),
 			s === "settings" && /* @__PURE__ */ (0, p.jsx)(we, {
-				...h,
-				a: m,
+				...v,
+				a: _,
 				lang: n,
 				setLang: i
 			})
@@ -10384,7 +10394,7 @@ function xe({ a: e, ...t }) {
 		...ye(n.state, t)
 	})), a = Math.min(...i.map((e) => e.days ?? Infinity)), o = i.map((e) => ({
 		...e,
-		next: e.days === a
+		next: Number.isFinite(a) && e.days === a
 	})), s = o.filter((e) => e.next), c = o.filter((e) => e.days === 1), l = o.filter((e) => e.days === 0), u = e.invoice?.attributes.invoices?.[0], d = [...o].sort((e, t) => (e.days ?? 1e9) - (t.days ?? 1e9));
 	return /* @__PURE__ */ (0, p.jsxs)(p.Fragment, { children: [/* @__PURE__ */ (0, p.jsx)("div", {
 		className: `banner ${c.length || l.length ? "on" : ""}`,
