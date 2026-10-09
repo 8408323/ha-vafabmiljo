@@ -80,6 +80,9 @@ Available in English and Swedish, matching HA's own language setting.
   with PDF links and a per-year total, contract fees, and the notification switches/times.
   Language follows Home Assistant or can be set in the panel: Swedish, Norwegian, Danish,
   Finnish, Icelandic, English
+- **BankID login from the panel** (Settings → Account): scan the QR or open BankID on the same
+  phone. Setup no longer asks for BankID by default; connect (or log in again when the session
+  has expired) from the panel whenever you want invoices and fees
 - **Notifications per recipient**, set up in the panel (Settings → Notifications from Home
   Assistant): pick a phone (or any notify service), whether it gets the pickup reminder
   (the evening before or the same morning, at its own time), new invoices and invoice-due

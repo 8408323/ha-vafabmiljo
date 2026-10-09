@@ -15,7 +15,7 @@
         }
       },
       "bankid_start": {
-        "description": "Optionally connect your account via BankID to also get invoices and contract details.",
+        "description": "Optional: also connect your VafabMiljö account to get invoices and contract fees. You can skip this and do it later from the VafabMiljö panel in the sidebar (Settings → Log in with BankID).",
         "data": {
           "enable_bankid": "Connect with BankID"
         }

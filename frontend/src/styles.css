@@ -136,3 +136,6 @@ select { font: inherit; color: inherit; background: var(--vm-card); border: 1px 
 .modal { width: min(460px, 100%); margin: 0; }
 .modal-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .modal-actions .btn { margin-top: 0; }
+.login { text-align: center; }
+.login .qr { display: block; width: 220px; height: 220px; margin: 14px auto; background: #fff; border-radius: 12px; padding: 8px; }
+.login a.btn { display: inline-block; text-decoration: none; }

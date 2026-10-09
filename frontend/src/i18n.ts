@@ -20,6 +20,7 @@ const en = {
   pickup_reminder: "Pickup reminder", evening_before: "The evening before", same_morning: "The same morning", at: "at",
   new_invoice: "New invoice", invoice_due: "Invoice due tomorrow",
   save: "Save", cancel: "Cancel", remove: "Remove", admin_only: "Only administrators can change this.",
+  account: "Account (BankID)", bankid_ok: "Connected – invoices and fees are fetched.", bankid_none: "Not connected. Log in to see invoices and fees.", bankid_expired: "The login has expired, so invoices and fees are not updated. Log in again.", login: "Log in with BankID", relogin: "Log in again", scan_qr: "Open the BankID app and scan the QR code.", open_on_device: "Open BankID on this device", login_done: "Logged in. Fetching your account…", login_failed: "The login did not complete. Try again.",
 };
 export type T = typeof en;
 
@@ -44,6 +45,7 @@ const sv: T = {
   pickup_reminder: "Påminnelse om tömning", evening_before: "Kvällen före", same_morning: "Samma morgon", at: "kl.",
   new_invoice: "Ny faktura", invoice_due: "Faktura förfaller imorgon",
   save: "Spara", cancel: "Avbryt", remove: "Ta bort", admin_only: "Bara administratörer kan ändra detta.",
+  account: "Konto (BankID)", bankid_ok: "Anslutet – fakturor och avgifter hämtas.", bankid_none: "Inte anslutet. Logga in för att se fakturor och avgifter.", bankid_expired: "Inloggningen har gått ut, så fakturor och avgifter uppdateras inte. Logga in igen.", login: "Logga in med BankID", relogin: "Logga in igen", scan_qr: "Öppna BankID-appen och skanna QR-koden.", open_on_device: "Öppna BankID på den här enheten", login_done: "Inloggad. Hämtar ditt konto…", login_failed: "Inloggningen slutfördes inte. Försök igen.",
 };
 
 const nb: T = {
@@ -67,6 +69,7 @@ const nb: T = {
   pickup_reminder: "Påminnelse om tømming", evening_before: "Kvelden før", same_morning: "Samme morgen", at: "kl.",
   new_invoice: "Ny faktura", invoice_due: "Faktura forfaller i morgen",
   save: "Lagre", cancel: "Avbryt", remove: "Fjern", admin_only: "Bare administratorer kan endre dette.",
+  account: "Konto (BankID)", bankid_ok: "Tilkoblet – fakturaer og gebyrer hentes.", bankid_none: "Ikke tilkoblet. Logg inn for å se fakturaer og gebyrer.", bankid_expired: "Innloggingen har utløpt, så fakturaer og gebyrer oppdateres ikke. Logg inn igjen.", login: "Logg inn med BankID", relogin: "Logg inn igjen", scan_qr: "Åpne BankID-appen og skann QR-koden.", open_on_device: "Åpne BankID på denne enheten", login_done: "Innlogget. Henter kontoen din…", login_failed: "Innloggingen ble ikke fullført. Prøv igjen.",
 };
 
 const da: T = {
@@ -90,6 +93,7 @@ const da: T = {
   pickup_reminder: "Påmindelse om tømning", evening_before: "Aftenen før", same_morning: "Samme morgen", at: "kl.",
   new_invoice: "Ny faktura", invoice_due: "Faktura forfalder i morgen",
   save: "Gem", cancel: "Annuller", remove: "Fjern", admin_only: "Kun administratorer kan ændre dette.",
+  account: "Konto (BankID)", bankid_ok: "Forbundet – fakturaer og gebyrer hentes.", bankid_none: "Ikke forbundet. Log ind for at se fakturaer og gebyrer.", bankid_expired: "Login er udløbet, så fakturaer og gebyrer opdateres ikke. Log ind igen.", login: "Log ind med BankID", relogin: "Log ind igen", scan_qr: "Åbn BankID-appen og scan QR-koden.", open_on_device: "Åbn BankID på denne enhed", login_done: "Logget ind. Henter din konto…", login_failed: "Login blev ikke gennemført. Prøv igen.",
 };
 
 const fi: T = {
@@ -113,6 +117,7 @@ const fi: T = {
   pickup_reminder: "Tyhjennysmuistutus", evening_before: "Edellisenä iltana", same_morning: "Samana aamuna", at: "klo",
   new_invoice: "Uusi lasku", invoice_due: "Lasku erääntyy huomenna",
   save: "Tallenna", cancel: "Peruuta", remove: "Poista", admin_only: "Vain ylläpitäjät voivat muuttaa tätä.",
+  account: "Tili (BankID)", bankid_ok: "Yhdistetty – laskut ja maksut haetaan.", bankid_none: "Ei yhdistetty. Kirjaudu nähdäksesi laskut ja maksut.", bankid_expired: "Kirjautuminen on vanhentunut, joten laskuja ja maksuja ei päivitetä. Kirjaudu uudelleen.", login: "Kirjaudu BankID:llä", relogin: "Kirjaudu uudelleen", scan_qr: "Avaa BankID-sovellus ja skannaa QR-koodi.", open_on_device: "Avaa BankID tällä laitteella", login_done: "Kirjauduttu. Haetaan tiliäsi…", login_failed: "Kirjautuminen ei onnistunut. Yritä uudelleen.",
 };
 
 const is_: T = {
@@ -136,6 +141,7 @@ const is_: T = {
   pickup_reminder: "Áminning um losun", evening_before: "Kvöldið áður", same_morning: "Sama morgun", at: "kl.",
   new_invoice: "Nýr reikningur", invoice_due: "Reikningur á gjalddaga á morgun",
   save: "Vista", cancel: "Hætta við", remove: "Fjarlægja", admin_only: "Aðeins stjórnendur geta breytt þessu.",
+  account: "Aðgangur (BankID)", bankid_ok: "Tengt – reikningar og gjöld eru sótt.", bankid_none: "Ekki tengt. Skráðu þig inn til að sjá reikninga og gjöld.", bankid_expired: "Innskráningin er útrunnin, svo reikningar og gjöld uppfærast ekki. Skráðu þig inn aftur.", login: "Skrá inn með BankID", relogin: "Skrá inn aftur", scan_qr: "Opnaðu BankID-appið og skannaðu QR-kóðann.", open_on_device: "Opna BankID á þessu tæki", login_done: "Innskráning tókst. Sæki aðganginn þinn…", login_failed: "Innskráningin kláraðist ekki. Reyndu aftur.",
 };
 
 // code -> [strings, date locale, name in its own language]

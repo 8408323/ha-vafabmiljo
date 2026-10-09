@@ -196,5 +196,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
     if hass.data.get(f"{DOMAIN}_ws"):
         return
     hass.data[f"{DOMAIN}_ws"] = True
-    for command in (ws_get, ws_set):
+    from .login import COMMANDS as LOGIN_COMMANDS
+
+    for command in (ws_get, ws_set, *LOGIN_COMMANDS):
         websocket_api.async_register_command(hass, command)

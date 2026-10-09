@@ -166,4 +166,4 @@ def test_websocket_commands_register_once():
     hass = HomeAssistant()
     async_setup_websocket(hass)
     async_setup_websocket(hass)
-    assert websocket_api.registered == [ws_get, ws_set]
+    assert websocket_api.registered[:2] == [ws_get, ws_set] and len(websocket_api.registered) == 5

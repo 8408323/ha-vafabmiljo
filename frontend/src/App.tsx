@@ -8,7 +8,7 @@ type Ent = { entity_id: string; device_id?: string; platform: string; translatio
 type St = { entity_id: string; state: string; attributes: Record<string, any> };
 type Invoice = { id: number; amount: number | null; invoice_date: string | null; due_date: string | null; payment_status: string | null };
 type Addr = {
-  id: string; entryId?: string; name: string; pickups: St[]; invoice?: St; fees: St[]; property?: St; calendar?: St; switches: St[]; times: St[];
+  id: string; entryId?: string; name: string; pickups: St[]; invoice?: St; bankid?: St; fees: St[]; property?: St; calendar?: St; switches: St[]; times: St[];
 };
 type Ctx = { hass: any; t: T; locale: string };
 
@@ -36,6 +36,7 @@ export function addresses(hass: any): Addr[] {
     if (domain === "sensor" && s.attributes.device_class === "date") a.pickups.push(s);
     else if (e.translation_key === "latest_invoice") a.invoice = s;
     else if (e.translation_key === "property") a.property = s;
+    else if (e.translation_key === "bankid_connected") a.bankid = s;
     else if (domain === "sensor" && "pickups_per_year" in s.attributes) a.fees.push(s);
     else if (domain === "calendar") a.calendar = s;
     else if (domain === "switch") a.switches.push(s);
@@ -225,6 +226,7 @@ function Invoices({ a, hass, t, locale }: Ctx & { a: Addr }) {
 function Settings({ a, hass, t, lang, setLang }: Ctx & { a: Addr; lang: string | null; setLang: (x: string | null) => void }) {
   return (
     <div className="settings-grid">
+      <Account a={a} hass={hass} t={t} />
       <Recipients a={a} hass={hass} t={t} />
       <div className="card">
         <h2>{t.language}</h2>
@@ -256,6 +258,60 @@ function Settings({ a, hass, t, lang, setLang }: Ctx & { a: Addr; lang: string |
           </label>
         ))}
       </div>}
+    </div>
+  );
+}
+
+/* ---------------- BankID login ---------------- */
+type Login = { status: "waiting" | "done" | "failed" | "none"; qr?: string | null; autostart?: string | null };
+
+function Account({ a, hass, t }: { a: Addr; hass: any; t: T }) {
+  const [login, setLogin] = useState<Login | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const admin = hass.user?.is_admin !== false;
+  // The session cookie can be present but rejected by the backend; then the account data stays empty.
+  const connected = a.bankid?.state === "on";
+  const dataOk = !!a.invoice && !["unknown", "unavailable"].includes(a.invoice.state);
+  const [cls, text] = !connected ? ["", t.bankid_none] : dataOk ? ["pos", t.bankid_ok] : ["warn", t.bankid_expired];
+
+  const send = (type: string) => hass.connection.sendMessagePromise({ type, entry_id: a.entryId });
+  useEffect(() => {
+    if (login?.status !== "waiting") return;
+    const id = setInterval(() => send("vafabmiljo/login/status").then(setLogin).catch(() => undefined), 2000);
+    return () => clearInterval(id);
+  }, [login?.status]);
+  const start = async () => {
+    setErr(null);
+    try { setLogin(await send("vafabmiljo/login/start")); } catch (e: any) { setErr(e?.message ?? String(e)); }
+  };
+  const close = () => { if (login?.status === "waiting") send("vafabmiljo/login/cancel").catch(() => undefined); setLogin(null); };
+
+  return (
+    <div className="card">
+      <h2>{t.account}</h2>
+      <div className={`muted ${cls}`} style={{ margin: "6px 0" }}>{text}</div>
+      {err && <div className="neg">{err}</div>}
+      {admin ? <button className="btn primary" disabled={!a.entryId} onClick={start}>{connected ? t.relogin : t.login}</button>
+        : <div className="muted">{t.admin_only}</div>}
+      {login && (
+        <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+          <div className="modal card login" role="dialog" aria-modal="true" aria-label={t.login}>
+            <h2>{t.login}</h2>
+            {login.status === "waiting" && <>
+              <div className="muted">{t.scan_qr}</div>
+              {login.qr && <img className="qr" src={login.qr} alt="BankID QR" />}
+              {login.autostart && <a className="btn" href={login.autostart}>{t.open_on_device}</a>}
+            </>}
+            {login.status === "done" && <div className="pos">✓ {t.login_done}</div>}
+            {(login.status === "failed" || login.status === "none") && <div className="neg">{t.login_failed}</div>}
+            <div className="modal-actions">
+              <span style={{ flex: 1 }} />
+              {login.status === "failed" && <button className="btn" onClick={start}>{t.relogin}</button>}
+              <button className="btn" onClick={close}>{login.status === "done" ? "OK" : t.cancel}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
