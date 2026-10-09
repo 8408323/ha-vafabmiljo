@@ -1,0 +1,238 @@
+{
+ "entities": {
+  "sensor.exempelgatan_1_exempelstad_restavfall": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_restavfall",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": null
+  },
+  "sensor.exempelgatan_1_exempelstad_matavfall": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_matavfall",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": null
+  },
+  "sensor.exempelgatan_1_exempelstad_plast_och_papper": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_plast_och_papper",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": null
+  },
+  "sensor.exempelgatan_1_exempelstad_latest_invoice": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_latest_invoice",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "latest_invoice"
+  },
+  "sensor.exempelgatan_1_exempelstad_fast_grundavgift_smahus": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_fast_grundavgift_smahus",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": null
+  },
+  "sensor.exempelgatan_1_exempelstad_karl_370_l": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_karl_370_l",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": null
+  },
+  "sensor.exempelgatan_1_exempelstad_property": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_property",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "property"
+  },
+  "calendar.exempelgatan_1_exempelstad_pickups": {
+   "entity_id": "calendar.exempelgatan_1_exempelstad_pickups",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "pickups"
+  },
+  "switch.exempelgatan_1_exempelstad_notify_garbage": {
+   "entity_id": "switch.exempelgatan_1_exempelstad_notify_garbage",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "notify_garbage"
+  },
+  "switch.exempelgatan_1_exempelstad_notify_status": {
+   "entity_id": "switch.exempelgatan_1_exempelstad_notify_status",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "notify_status"
+  },
+  "switch.exempelgatan_1_exempelstad_notify_news": {
+   "entity_id": "switch.exempelgatan_1_exempelstad_notify_news",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "notify_news"
+  },
+  "time.exempelgatan_1_exempelstad_reminder_time": {
+   "entity_id": "time.exempelgatan_1_exempelstad_reminder_time",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "reminder_time"
+  },
+  "time.exempelgatan_1_exempelstad_invoice_reminder_time": {
+   "entity_id": "time.exempelgatan_1_exempelstad_invoice_reminder_time",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "invoice_reminder_time"
+  }
+ },
+ "states": {
+  "sensor.exempelgatan_1_exempelstad_restavfall": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_restavfall",
+   "state": "2026-10-19",
+   "attributes": {
+    "device_class": "date",
+    "bin_type": "Restavfall",
+    "friendly_name": "Exempelgatan 1, Exempelstad Restavfall"
+   }
+  },
+  "sensor.exempelgatan_1_exempelstad_matavfall": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_matavfall",
+   "state": "2026-10-19",
+   "attributes": {
+    "device_class": "date",
+    "bin_type": "Matavfall",
+    "friendly_name": "Exempelgatan 1, Exempelstad Matavfall"
+   }
+  },
+  "sensor.exempelgatan_1_exempelstad_plast_och_papper": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_plast_och_papper",
+   "state": "2026-10-29",
+   "attributes": {
+    "device_class": "date",
+    "bin_type": "Plast och papper",
+    "friendly_name": "Exempelgatan 1, Exempelstad Plast och papper"
+   }
+  },
+  "sensor.exempelgatan_1_exempelstad_latest_invoice": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_latest_invoice",
+   "state": "1243.0",
+   "attributes": {
+    "invoices": [
+     {
+      "id": 4300000,
+      "amount": 1243.0,
+      "invoice_date": "2026-09-25T00:00:00",
+      "due_date": "2026-10-31T00:00:00",
+      "payment_status": "Obetald",
+      "ocr_number": "123"
+     },
+     {
+      "id": 4300001,
+      "amount": 1243.0,
+      "invoice_date": "2026-06-25T00:00:00",
+      "due_date": "2026-07-31T00:00:00",
+      "payment_status": "Helt betald",
+      "ocr_number": "123"
+     },
+     {
+      "id": 4300002,
+      "amount": 1243.0,
+      "invoice_date": "2026-03-25T00:00:00",
+      "due_date": "2026-04-30T00:00:00",
+      "payment_status": "Helt betald",
+      "ocr_number": "123"
+     },
+     {
+      "id": 4300003,
+      "amount": 1188.0,
+      "invoice_date": "2025-12-22T00:00:00",
+      "due_date": "2026-01-31T00:00:00",
+      "payment_status": "Helt betald",
+      "ocr_number": "123"
+     },
+     {
+      "id": 4300004,
+      "amount": 1188.0,
+      "invoice_date": "2025-09-25T00:00:00",
+      "due_date": "2025-10-31T00:00:00",
+      "payment_status": "Helt betald",
+      "ocr_number": "123"
+     }
+    ],
+    "unit_of_measurement": "SEK",
+    "friendly_name": "Exempelgatan 1, Exempelstad Latest invoice"
+   }
+  },
+  "sensor.exempelgatan_1_exempelstad_fast_grundavgift_smahus": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_fast_grundavgift_smahus",
+   "state": "1590",
+   "attributes": {
+    "type": "FAST",
+    "pickups_per_year": null,
+    "unit": "kr/år",
+    "unit_of_measurement": "kr/år",
+    "friendly_name": "Exempelgatan 1, Exempelstad Fast grundavgift småhus"
+   }
+  },
+  "sensor.exempelgatan_1_exempelstad_karl_370_l": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_karl_370_l",
+   "state": "2380",
+   "attributes": {
+    "type": "KARL",
+    "pickups_per_year": 26,
+    "unit": "kr/år",
+    "unit_of_measurement": "kr/år",
+    "friendly_name": "Exempelgatan 1, Exempelstad Kärl 370 l fyrfack"
+   }
+  },
+  "sensor.exempelgatan_1_exempelstad_property": {
+   "entity_id": "sensor.exempelgatan_1_exempelstad_property",
+   "state": "EXEMPEL 1:23",
+   "attributes": {
+    "friendly_name": "Exempelgatan 1, Exempelstad Property"
+   }
+  },
+  "calendar.exempelgatan_1_exempelstad_pickups": {
+   "entity_id": "calendar.exempelgatan_1_exempelstad_pickups",
+   "state": "off",
+   "attributes": {
+    "message": "Restavfall, Matavfall",
+    "friendly_name": "Exempelgatan 1, Exempelstad Pickups"
+   }
+  },
+  "switch.exempelgatan_1_exempelstad_notify_garbage": {
+   "entity_id": "switch.exempelgatan_1_exempelstad_notify_garbage",
+   "state": "on",
+   "attributes": {
+    "friendly_name": "Exempelgatan 1, Exempelstad Waste pickup notifications"
+   }
+  },
+  "switch.exempelgatan_1_exempelstad_notify_status": {
+   "entity_id": "switch.exempelgatan_1_exempelstad_notify_status",
+   "state": "off",
+   "attributes": {
+    "friendly_name": "Exempelgatan 1, Exempelstad Operational information notifications"
+   }
+  },
+  "switch.exempelgatan_1_exempelstad_notify_news": {
+   "entity_id": "switch.exempelgatan_1_exempelstad_notify_news",
+   "state": "off",
+   "attributes": {
+    "friendly_name": "Exempelgatan 1, Exempelstad News notifications"
+   }
+  },
+  "time.exempelgatan_1_exempelstad_reminder_time": {
+   "entity_id": "time.exempelgatan_1_exempelstad_reminder_time",
+   "state": "18:00:00",
+   "attributes": {
+    "friendly_name": "Exempelgatan 1, Exempelstad Reminder time"
+   }
+  },
+  "time.exempelgatan_1_exempelstad_invoice_reminder_time": {
+   "entity_id": "time.exempelgatan_1_exempelstad_invoice_reminder_time",
+   "state": "18:00:00",
+   "attributes": {
+    "friendly_name": "Exempelgatan 1, Exempelstad Invoice reminder time"
+   }
+  }
+ },
+ "devices": {
+  "dev1": {
+   "name": "Exempelgatan 1, Exempelstad"
+  }
+ }
+}

@@ -11,9 +11,10 @@ from .api import VafabMiljoClient
 from .const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE
 from .coordinator import VafabMiljoCoordinator
 from .invoices import VafabMiljoInvoiceNotifier, async_remove_invoice_store
+from .panel import async_register_panel
 from .services import async_setup_services
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH, Platform.TIME]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.CALENDAR, Platform.SENSOR, Platform.SWITCH, Platform.TIME]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -31,6 +32,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # away, and an automation reacting to that event may call this service.
     # Registration is idempotent across entries.
     async_setup_services(hass)
+    await async_register_panel(hass)
     if coordinator.data.authenticated:
         # Event-based new-invoice / due-reminder delivery (see invoices.py).
         # Only for BankID-connected entries: an anonymous one never sees an

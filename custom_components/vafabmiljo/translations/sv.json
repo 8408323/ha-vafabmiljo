@@ -101,6 +101,11 @@
       "invoice_reminder_time": {
         "name": "Påminnelsetid faktura"
       }
+    },
+    "calendar": {
+      "pickups": {
+        "name": "Tömningar"
+      }
     }
   },
   "services": {

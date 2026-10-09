@@ -32,6 +32,7 @@ def _install_stub_homeassistant() -> None:
 
     class Platform(str, enum.Enum):
         BINARY_SENSOR = "binary_sensor"
+        CALENDAR = "calendar"
         SENSOR = "sensor"
         SWITCH = "switch"
         TIME = "time"
@@ -105,6 +106,12 @@ def _install_stub_homeassistant() -> None:
             self.scheduled_jobs: list[Any] = []
             # (action, when) pairs registered via async_track_point_in_time
             self.scheduled_timers: list[tuple[Any, Any]] = []
+            self.static_paths: list[Any] = []
+
+            async def _register_static_paths(configs) -> None:
+                self.static_paths.extend(configs)
+
+            self.http = types.SimpleNamespace(async_register_static_paths=_register_static_paths)
 
         def async_create_task(self, coro, name=None):
             return asyncio.ensure_future(coro)
@@ -478,6 +485,39 @@ def _install_stub_homeassistant() -> None:
 
     time_mod.TimeEntity = TimeEntity
     sys.modules["homeassistant.components.time"] = time_mod
+
+    calendar_mod = types.ModuleType("homeassistant.components.calendar")
+
+    class CalendarEvent:
+        def __init__(self, *, start, end, summary: str) -> None:
+            self.start, self.end, self.summary = start, end, summary
+
+    class CalendarEntity:
+        pass
+
+    calendar_mod.CalendarEvent = CalendarEvent
+    calendar_mod.CalendarEntity = CalendarEntity
+    sys.modules["homeassistant.components.calendar"] = calendar_mod
+
+    # The panel registration only records what it was asked to register.
+    http_mod = types.ModuleType("homeassistant.components.http")
+
+    class StaticPathConfig:
+        def __init__(self, url_path: str, path: str, cache_headers: bool = True) -> None:
+            self.url_path, self.path, self.cache_headers = url_path, path, cache_headers
+
+    http_mod.StaticPathConfig = StaticPathConfig
+    sys.modules["homeassistant.components.http"] = http_mod
+
+    panel_custom_mod = types.ModuleType("homeassistant.components.panel_custom")
+    panel_custom_mod.panels = []
+
+    async def async_register_panel(hass, **kwargs) -> None:
+        panel_custom_mod.panels.append(kwargs)
+
+    panel_custom_mod.async_register_panel = async_register_panel
+    components.panel_custom = panel_custom_mod
+    sys.modules["homeassistant.components.panel_custom"] = panel_custom_mod
 
     diagnostics_mod = types.ModuleType("homeassistant.components.diagnostics")
     REDACTED = "**REDACTED**"

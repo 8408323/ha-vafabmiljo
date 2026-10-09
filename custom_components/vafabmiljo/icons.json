@@ -40,6 +40,11 @@
       "invoice_reminder_time": {
         "default": "mdi:calendar-clock-outline"
       }
+    },
+    "calendar": {
+      "pickups": {
+        "default": "mdi:calendar-sync-outline"
+      }
     }
   }
 }

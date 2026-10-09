@@ -101,6 +101,11 @@
       "invoice_reminder_time": {
         "name": "Invoice reminder time"
       }
+    },
+    "calendar": {
+      "pickups": {
+        "name": "Pickups"
+      }
     }
   },
   "services": {
