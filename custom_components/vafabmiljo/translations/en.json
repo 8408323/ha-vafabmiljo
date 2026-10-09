@@ -119,5 +119,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "bankid_expired": {
+      "title": "VafabMiljö: log in with BankID again",
+      "description": "The BankID login for **{address}** has expired, so invoices and fees are no longer updated (pickup dates still are). Open the VafabMiljö panel (Learn more), go to **Settings → Account** and click **Log in again**."
+    }
   }
 }

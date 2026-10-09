@@ -152,7 +152,9 @@ async def test_remove_entry_deletes_the_invoice_store():
     hass.data["_stores"] = {"vafabmiljo.test_entry.invoices": {"announced": [1]}}
     entry = _entry()
 
+    hass.data["_issues"] = {("vafabmiljo", "bankid_expired_test_entry"): {}}
     await async_remove_entry(hass, entry)
+    assert hass.data["_issues"] == {}  # the repair goes with the entry
 
     assert hass.data["_stores"] == {}
 

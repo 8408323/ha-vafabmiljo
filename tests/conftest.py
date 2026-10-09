@@ -168,6 +168,7 @@ def _install_stub_homeassistant() -> None:
             self.options = options or {}
             self.entry_id = "test_entry"
             self.domain = "vafabmiljo"
+            self.title = "Testgatan 1, Teststad"
             self.runtime_data: Any = None
             self._unload_callbacks: list = []
 
@@ -390,6 +391,24 @@ def _install_stub_homeassistant() -> None:
 
     start_mod.async_at_started = async_at_started
     sys.modules["homeassistant.helpers.start"] = start_mod
+
+    # Repair issues live on hass.data["_issues"] so tests can inspect them.
+    ir_mod = types.ModuleType("homeassistant.helpers.issue_registry")
+
+    class IssueSeverity(str, enum.Enum):
+        WARNING = "warning"
+
+    def async_create_issue(hass, domain, issue_id, **kwargs) -> None:
+        hass.data.setdefault("_issues", {})[(domain, issue_id)] = kwargs
+
+    def async_delete_issue(hass, domain, issue_id) -> None:
+        hass.data.setdefault("_issues", {}).pop((domain, issue_id), None)
+
+    ir_mod.IssueSeverity = IssueSeverity
+    ir_mod.async_create_issue = async_create_issue
+    ir_mod.async_delete_issue = async_delete_issue
+    helpers.issue_registry = ir_mod
+    sys.modules["homeassistant.helpers.issue_registry"] = ir_mod
 
     storage_mod = types.ModuleType("homeassistant.helpers.storage")
 
