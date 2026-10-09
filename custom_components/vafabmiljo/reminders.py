@@ -106,6 +106,7 @@ class VafabMiljoNotifier:
             self._unsubs.append(self._hass.bus.async_listen(event_type, self._on_invoice_event))
         self._unsubs.append(self._coordinator.async_add_listener(self._on_update))
         self._schedule()
+        self._on_update()  # the first refresh (before this listener existed) may already have found it expired
 
     @callback
     def _on_update(self) -> None:
@@ -172,11 +173,22 @@ class VafabMiljoNotifier:
         return _TEXT["sv" if str(self._hass.config.language).startswith("sv") else "en"]
 
     async def _send(self, service: str, title: str, message: str) -> None:
-        # one broken recipient (an uninstalled phone app) must not stop the others
+        # A recipient is a legacy notify action ("mobile_app_x") or a notify entity ("notify.x",
+        # sent through notify.send_message). One broken recipient must not stop the others.
+        if service.startswith("notify."):
+            domain_service, data = "send_message", {"entity_id": service, "title": title, "message": message}
+        else:
+            domain_service, data = service, {"title": title, "message": message}
         try:
-            await self._hass.services.async_call("notify", service, {"title": title, "message": message}, blocking=True)
+            await self._hass.services.async_call("notify", domain_service, data, blocking=True)
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("notify.%s failed: %s", service, err)
+
+
+def notify_targets(hass: HomeAssistant) -> list[str]:
+    """Legacy notify actions (minus the generic send_message, which needs a target) plus notify entities."""
+    legacy = [s for s in hass.services.async_services().get("notify", {}) if s != "send_message"]
+    return sorted(legacy) + sorted(hass.states.async_entity_ids("notify"))
 
 
 def _notifier(hass: HomeAssistant, entry_id: str) -> VafabMiljoNotifier | None:
@@ -194,7 +206,7 @@ def ws_get(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
         return
     connection.send_result(
         msg["id"],
-        {"recipients": notifier.recipients, "services": sorted(hass.services.async_services().get("notify", {}))},
+        {"recipients": notifier.recipients, "services": notify_targets(hass)},
     )
 
 

@@ -10593,12 +10593,12 @@ function we({ a: e, hass: t, t: n, lang: r, setLang: i }) {
 				a: e,
 				hass: t,
 				t: n
-			}),
+			}, `acc-${e.entryId}`),
 			/* @__PURE__ */ (0, p.jsx)(T, {
 				a: e,
 				hass: t,
 				t: n
-			}),
+			}, `rec-${e.entryId}`),
 			/* @__PURE__ */ (0, p.jsxs)("div", {
 				className: "card",
 				children: [/* @__PURE__ */ (0, p.jsx)("h2", { children: n.language }), /* @__PURE__ */ (0, p.jsxs)("label", {
@@ -10754,6 +10754,7 @@ var Ee = {
 	session_expired: !0
 };
 function w(e, t) {
+	if (t.startsWith("notify.")) return e.states[t]?.attributes?.friendly_name ?? t;
 	let n = t.replace(/^mobile_app_/, ""), r = Object.values(e.devices ?? {}).find((e) => (e.name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_") === n), i = r?.name_by_user || r?.name || n.replace(/_/g, " ");
 	return i[0].toUpperCase() + i.slice(1);
 }

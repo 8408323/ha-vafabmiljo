@@ -124,6 +124,9 @@ def _install_stub_homeassistant() -> None:
                 self.static_paths.extend(configs)
 
             self.http = types.SimpleNamespace(async_register_static_paths=_register_static_paths)
+            # entity ids per domain, for hass.states.async_entity_ids
+            self.entity_ids: dict[str, list[str]] = {}
+            self.states = types.SimpleNamespace(async_entity_ids=lambda domain: list(self.entity_ids.get(domain, [])))
 
         def async_create_task(self, coro, name=None):
             return asyncio.ensure_future(coro)
@@ -566,6 +569,12 @@ def _install_stub_homeassistant() -> None:
     websocket_mod.async_register_command = lambda hass, cmd: websocket_mod.registered.append(cmd)
     components.websocket_api = websocket_mod
     sys.modules["homeassistant.components.websocket_api"] = websocket_mod
+
+    frontend_mod = types.ModuleType("homeassistant.components.frontend")
+    frontend_mod.removed = []
+    frontend_mod.async_remove_panel = lambda hass, url_path: frontend_mod.removed.append(url_path)
+    components.frontend = frontend_mod
+    sys.modules["homeassistant.components.frontend"] = frontend_mod
 
     diagnostics_mod = types.ModuleType("homeassistant.components.diagnostics")
     REDACTED = "**REDACTED**"

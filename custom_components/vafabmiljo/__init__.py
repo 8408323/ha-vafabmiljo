@@ -11,7 +11,8 @@ from .api import VafabMiljoClient
 from .const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE
 from .coordinator import VafabMiljoCoordinator
 from .invoices import VafabMiljoInvoiceNotifier, async_remove_invoice_store
-from .panel import async_register_panel
+from .login import async_cancel_login
+from .panel import async_register_panel, async_unregister_panel
 from .reminders import VafabMiljoNotifier, async_setup_websocket, store_for
 from .services import async_setup_services
 
@@ -33,8 +34,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # away, and an automation reacting to that event may call this service.
     # Registration is idempotent across entries.
     async_setup_services(hass)
-    await async_register_panel(hass)
+    await async_register_panel(hass, entry.entry_id)
     async_setup_websocket(hass)
+    entry.async_on_unload(lambda: async_cancel_login(hass, entry.entry_id))
     # Per-recipient notifications configured in the panel (reminders.py).
     coordinator.reminders = VafabMiljoNotifier(hass, entry, coordinator)
     entry.async_on_unload(coordinator.reminders.async_unload)
@@ -73,8 +75,10 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    # The invoice notifier is unloaded through entry.async_on_unload (see setup).
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    # The invoice notifier, reminders and a running panel login are unloaded through entry.async_on_unload.
+    if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        async_unregister_panel(hass, entry.entry_id)
+    return unloaded
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

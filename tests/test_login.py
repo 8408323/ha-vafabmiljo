@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from vafabmiljo import login
 from vafabmiljo.api import VafabMiljoError
-from vafabmiljo.login import KEY, ws_cancel, ws_start, ws_status
+from vafabmiljo.login import KEY, async_cancel_login, ws_cancel, ws_start, ws_status
 
 OK = {"status": "authenticated successfully", "qr": "", "hint": ""}
 FAILED = {"status": {"message": {"status": "failed", "hintCode": "startFailed"}}}
@@ -98,3 +98,14 @@ async def test_start_errors(setup):
     await ws_start(s.hass, s.conn, {"id": 2, "entry_id": s.entry.entry_id})
     assert [c.args[1] for c in s.conn.send_error.call_args_list] == ["not_found", "cannot_connect"]
     assert s.entry.entry_id not in s.hass.data.get(KEY, {})
+
+
+async def test_unloading_the_entry_stops_its_login(setup):
+    s = setup
+    s.client.poll_bankid_status.side_effect = lambda: asyncio.sleep(10)
+    await ws_start(s.hass, s.conn, {"id": 1, "entry_id": s.entry.entry_id})
+    running = s.hass.data[KEY][s.entry.entry_id]
+    async_cancel_login(s.hass, s.entry.entry_id)
+    await asyncio.sleep(0)
+    assert running.task.cancelled() or running.task.cancelling()
+    assert s.entry.entry_id not in s.hass.data[KEY]

@@ -231,8 +231,9 @@ function Invoices({ a, hass, t, locale }: Ctx & { a: Addr }) {
 function Settings({ a, hass, t, lang, setLang }: Ctx & { a: Addr; lang: string | null; setLang: (x: string | null) => void }) {
   return (
     <div className="settings-grid">
-      <Account a={a} hass={hass} t={t} />
-      <Recipients a={a} hass={hass} t={t} />
+      {/* keyed by entry: switching address starts fresh, so one address's list can't be saved to another */}
+      <Account key={`acc-${a.entryId}`} a={a} hass={hass} t={t} />
+      <Recipients key={`rec-${a.entryId}`} a={a} hass={hass} t={t} />
       <div className="card">
         <h2>{t.language}</h2>
         <label className="row">
@@ -324,8 +325,9 @@ function Account({ a, hass, t }: { a: Addr; hass: any; t: T }) {
 type Recipient = { service: string; pickup: boolean; pickup_days_before: 0 | 1; pickup_time: string; new_invoice: boolean; invoice_due: boolean; session_expired: boolean };
 const NEW: Omit<Recipient, "service"> = { pickup: true, pickup_days_before: 1, pickup_time: "18:00", new_invoice: true, invoice_due: true, session_expired: true };
 
-// "mobile_app_jonathans_iphone" -> "Jonathans iphone"; the HA app's own device name when we can find it
+// "notify.x" entity -> its friendly name; "mobile_app_jonathans_iphone" -> the HA app's device name when we can find it
 function serviceName(hass: any, service: string) {
+  if (service.startsWith("notify.")) return hass.states[service]?.attributes?.friendly_name ?? service;
   const slug = service.replace(/^mobile_app_/, "");
   const dev = Object.values((hass.devices ?? {}) as Record<string, any>).find((d) => (d.name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_") === slug);
   const name = dev?.name_by_user || dev?.name || slug.replace(/_/g, " ");

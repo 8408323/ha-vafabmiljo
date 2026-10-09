@@ -181,3 +181,27 @@ async def test_expired_login_is_announced_once_per_expiry():
         notifier._on_update()
         await asyncio.sleep(0)
     assert _sent(hass) == [("a", "VafabMiljö: inloggningen har gått ut")] * 2
+
+
+async def test_notify_entities_go_through_send_message_and_are_offered():
+    hass, entry, notifier = _setup()
+    await notifier.async_set([{"service": "notify.sofias_phone"}])
+    await notifier._on_invoice_event(Event(EVENT_NEW_INVOICE, {"entry_id": entry.entry_id, "amount": 1}))
+    call = hass.services.async_call.await_args
+    assert call.args[:2] == ("notify", "send_message")
+    assert call.args[2]["entity_id"] == "notify.sofias_phone"
+
+    from vafabmiljo.reminders import notify_targets
+
+    hass.services.async_services = lambda: {"notify": {"send_message": None, "mobile_app_a": None}}
+    hass.entity_ids["notify"] = ["notify.sofias_phone"]
+    assert notify_targets(hass) == ["mobile_app_a", "notify.sofias_phone"]
+
+
+async def test_an_already_expired_session_is_announced_at_setup():
+    hass, _, notifier = _setup()
+    await notifier._store.async_save([{"service": "a"}])
+    notifier._coordinator.data.session_expired = True
+    await notifier.async_setup()
+    await asyncio.sleep(0)
+    assert _sent(hass) == [("a", "VafabMiljö: inloggningen har gått ut")]

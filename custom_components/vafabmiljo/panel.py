@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from homeassistant.components import panel_custom
+from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
@@ -15,8 +15,9 @@ _LOGGER = logging.getLogger(__name__)
 KEY = "vafabmiljo_panel"
 
 
-async def async_register_panel(hass: HomeAssistant) -> None:
+async def async_register_panel(hass: HomeAssistant, entry_id: str) -> None:
     # Once per HA run, however many addresses are set up: the panel itself switches between them.
+    hass.data.setdefault(f"{KEY}_entries", set()).add(entry_id)
     if hass.data.get(KEY) or not (WWW / "panel.js").exists():
         return
     # The panel is optional: a failure here (e.g. another panel already owns the URL) must not take
@@ -40,3 +41,11 @@ async def async_register_panel(hass: HomeAssistant) -> None:
         _LOGGER.exception("Could not register the VafabMiljö panel; the integration works without it")
         return
     hass.data[KEY] = True
+
+
+def async_unregister_panel(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove the sidebar panel when the last loaded entry goes away."""
+    entries: set[str] = hass.data.get(f"{KEY}_entries", set())
+    entries.discard(entry_id)
+    if not entries and hass.data.pop(KEY, False):
+        frontend.async_remove_panel(hass, "vafabmiljo")
