@@ -9913,7 +9913,8 @@ var ce = {
 			scan_qr: "Öppna BankID-appen och skanna QR-koden.",
 			open_on_device: "Öppna BankID på den här enheten",
 			login_done: "Inloggad. Hämtar ditt konto…",
-			login_failed: "Inloggningen slutfördes inte. Försök igen."
+			login_failed: "Inloggningen slutfördes inte. Försök igen.",
+			bankid_unknown: "Når inte VafabMiljö just nu; försöker igen snart."
 		},
 		"sv-SE",
 		"Svenska"
@@ -9980,7 +9981,8 @@ var ce = {
 			scan_qr: "Åpne BankID-appen og skann QR-koden.",
 			open_on_device: "Åpne BankID på denne enheten",
 			login_done: "Innlogget. Henter kontoen din…",
-			login_failed: "Innloggingen ble ikke fullført. Prøv igjen."
+			login_failed: "Innloggingen ble ikke fullført. Prøv igjen.",
+			bankid_unknown: "Får ikke kontakt med VafabMiljö akkurat nå; prøver igjen snart."
 		},
 		"nb-NO",
 		"Norsk"
@@ -10047,7 +10049,8 @@ var ce = {
 			scan_qr: "Åbn BankID-appen og scan QR-koden.",
 			open_on_device: "Åbn BankID på denne enhed",
 			login_done: "Logget ind. Henter din konto…",
-			login_failed: "Login blev ikke gennemført. Prøv igen."
+			login_failed: "Login blev ikke gennemført. Prøv igen.",
+			bankid_unknown: "Kan ikke nå VafabMiljö lige nu; prøver igen om lidt."
 		},
 		"da-DK",
 		"Dansk"
@@ -10114,7 +10117,8 @@ var ce = {
 			scan_qr: "Avaa BankID-sovellus ja skannaa QR-koodi.",
 			open_on_device: "Avaa BankID tällä laitteella",
 			login_done: "Kirjauduttu. Haetaan tiliäsi…",
-			login_failed: "Kirjautuminen ei onnistunut. Yritä uudelleen."
+			login_failed: "Kirjautuminen ei onnistunut. Yritä uudelleen.",
+			bankid_unknown: "VafabMiljöön ei saada yhteyttä juuri nyt; yritetään pian uudelleen."
 		},
 		"fi-FI",
 		"Suomi"
@@ -10181,7 +10185,8 @@ var ce = {
 			scan_qr: "Opnaðu BankID-appið og skannaðu QR-kóðann.",
 			open_on_device: "Opna BankID á þessu tæki",
 			login_done: "Innskráning tókst. Sæki aðganginn þinn…",
-			login_failed: "Innskráningin kláraðist ekki. Reyndu aftur."
+			login_failed: "Innskráningin kláraðist ekki. Reyndu aftur.",
+			bankid_unknown: "Næ ekki sambandi við VafabMiljö í augnablikinu; reyni aftur fljótlega."
 		},
 		"is-IS",
 		"Íslenska"
@@ -10248,7 +10253,8 @@ var ce = {
 			scan_qr: "Open the BankID app and scan the QR code.",
 			open_on_device: "Open BankID on this device",
 			login_done: "Logged in. Fetching your account…",
-			login_failed: "The login did not complete. Try again."
+			login_failed: "The login did not complete. Try again.",
+			bankid_unknown: "Can't reach VafabMiljö right now; trying again shortly."
 		},
 		"en-GB",
 		"English"
@@ -10648,7 +10654,7 @@ function we({ a: e, hass: t, t: n, lang: r, setLang: i }) {
 	});
 }
 function Te({ a: e, hass: t, t: n }) {
-	let [r, i] = (0, d.useState)(null), [a, o] = (0, d.useState)(null), s = t.user?.is_admin !== !1, c = e.bankid?.state === "on", [l, u] = e.bankid ? c ? ["pos", n.bankid_ok] : ["warn", n.bankid_expired] : ["", n.bankid_none], f = (n) => t.connection.sendMessagePromise({
+	let [r, i] = (0, d.useState)(null), [a, o] = (0, d.useState)(null), s = t.user?.is_admin !== !1, c = e.bankid?.state === "on", [l, u] = e.bankid ? c ? ["pos", n.bankid_ok] : e.bankid.state === "off" ? ["warn", n.bankid_expired] : ["", n.bankid_unknown] : ["", n.bankid_none], f = (n) => t.connection.sendMessagePromise({
 		type: n,
 		entry_id: e.entryId
 	});

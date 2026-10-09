@@ -117,3 +117,12 @@ async def test_unloading_the_entry_stops_its_login(setup):
     await asyncio.sleep(0)
     assert running.task.cancelled() or running.task.cancelling()
     assert s.entry.entry_id not in s.hass.data[KEY]
+
+
+async def test_a_finished_login_survives_the_reload_it_triggers(setup):
+    s = setup
+    await ws_start(s.hass, s.conn, {"id": 1, "entry_id": s.entry.entry_id})
+    await s.hass.data[KEY][s.entry.entry_id].task
+    async_cancel_login(s.hass, s.entry.entry_id)  # the update listener's reload unloads the entry
+    ws_status(s.hass, s.conn, {"id": 2, "entry_id": s.entry.entry_id})
+    assert _result(s)["status"] == "done"

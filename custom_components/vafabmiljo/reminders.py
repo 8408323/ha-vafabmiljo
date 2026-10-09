@@ -152,12 +152,12 @@ class VafabMiljoNotifier:
     def _schedule(self) -> None:
         for unsub in self._timers:
             unsub()
-        # Only listen to the coordinator when someone wants the expiry alert: a listener keeps the
-        # cloud polling alive even when every entity is disabled. (Pickup reminders read the data on time.)
-        wants_expiry = any(r["session_expired"] for r in self.recipients)
-        if wants_expiry and self._unsub_coordinator is None:
+        # Listen to the coordinator only while a recipient needs fresh data (pickup dates or the expiry
+        # alert): a listener is what keeps the cloud polling alive when every entity is disabled.
+        needs_data = any(r["pickup"] or r["session_expired"] for r in self.recipients)
+        if needs_data and self._unsub_coordinator is None:
             self._unsub_coordinator = self._coordinator.async_add_listener(self._on_update)
-        elif not wants_expiry and self._unsub_coordinator is not None:
+        elif not needs_data and self._unsub_coordinator is not None:
             self._unsub_coordinator()
             self._unsub_coordinator = None
         times = {r["pickup_time"] for r in self.recipients if r["pickup"]}

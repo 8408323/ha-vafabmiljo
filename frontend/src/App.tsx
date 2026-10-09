@@ -275,9 +275,11 @@ function Account({ a, hass, t }: { a: Addr; hass: any; t: T }) {
   const [login, setLogin] = useState<Login | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const admin = hass.user?.is_admin !== false;
-  // The "BankID connected" sensor exists once BankID was ever set up, and is off while the backend rejects the session.
+  // The "BankID connected" sensor exists once BankID was ever set up and is off while the backend rejects
+  // the session; unavailable/unknown only means a refresh failed (e.g. the backend is down), not an expiry.
   const connected = a.bankid?.state === "on";
-  const [cls, text] = !a.bankid ? ["", t.bankid_none] : connected ? ["pos", t.bankid_ok] : ["warn", t.bankid_expired];
+  const [cls, text] = !a.bankid ? ["", t.bankid_none] : connected ? ["pos", t.bankid_ok]
+    : a.bankid.state === "off" ? ["warn", t.bankid_expired] : ["", t.bankid_unknown];
 
   const send = (type: string) => hass.connection.sendMessagePromise({ type, entry_id: a.entryId });
   useEffect(() => {

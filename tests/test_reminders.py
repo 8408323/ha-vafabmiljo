@@ -197,16 +197,18 @@ async def test_expired_login_is_announced_once_per_session_even_across_restarts(
     again.async_unload()
 
 
-async def test_old_list_format_still_loads_and_listener_follows_the_expiry_toggle():
+async def test_old_list_format_still_loads_and_listener_follows_the_recipients():
     hass, entry, notifier = _setup()
-    await notifier._store.async_save([{"service": "a", "session_expired": False}])  # first 0.4.0 format
+    off = {"pickup": False, "session_expired": False}
+    await notifier._store.async_save([{"service": "a", **off}])  # first 0.4.0 format
     await notifier.async_setup()
     assert notifier.recipients[0]["service"] == "a"
-    # nobody wants the expiry alert: no coordinator listener (it would keep polling alive)
+    # nobody needs fresh data: no coordinator listener (it would keep polling alive)
     assert notifier._unsub_coordinator is None
-    await notifier.async_set([{"service": "a"}])
-    assert notifier._unsub_coordinator is not None
+    # pickup reminders alone need fresh pickup dates, so they keep the polling going
     await notifier.async_set([{"service": "a", "session_expired": False}])
+    assert notifier._unsub_coordinator is not None
+    await notifier.async_set([{"service": "a", **off}])
     assert notifier._unsub_coordinator is None
 
 

@@ -140,9 +140,15 @@ def ws_cancel(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None
 
 @callback
 def async_cancel_login(hass: HomeAssistant, entry_id: str) -> None:
-    """Stop a panel login of an entry that is being unloaded or removed."""
-    if login := hass.data.get(KEY, {}).pop(entry_id, None):
+    """Stop a running panel login of an entry that is being unloaded or removed.
+
+    A finished one is kept: a successful login reloads the entry itself, and the panel still has
+    to read "done" afterwards.
+    """
+    logins = hass.data.get(KEY, {})
+    if (login := logins.get(entry_id)) is not None and login.status == "waiting":
         login.cancel()
+        del logins[entry_id]
 
 
 COMMANDS = (ws_start, ws_status, ws_cancel)
