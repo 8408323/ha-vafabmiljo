@@ -17,7 +17,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import VafabMiljoClient, VafabMiljoError
-from .config_flow import bankid_failure_hint, is_authenticated, qr_data_uri
+from .config_flow import (
+    bankid_autostart_desktop_url,
+    bankid_autostart_url,
+    bankid_failure_hint,
+    is_authenticated,
+    qr_data_uri,
+)
 from .const import (
     BANKID_POLL_INTERVAL,
     BANKID_POLL_TIMEOUT,
@@ -89,8 +95,10 @@ class PanelLogin:
             "status": self.status,
             "hint": self.hint,
             "qr": qr_data_uri(self.qr) if self.qr and self.status == "waiting" else None,
-            # opens the BankID app on the same device (phone/tablet)
-            "autostart": f"bankid:///?autostarttoken={self.token}&redirect=null" if self.token else None,
+            # open the BankID app on the same device: the panel uses the universal link on a phone or
+            # tablet and the bankid:/// scheme on a computer
+            "autostart": bankid_autostart_url(self.token) if self.token else None,
+            "autostart_desktop": bankid_autostart_desktop_url(self.token) if self.token else None,
         }
 
 

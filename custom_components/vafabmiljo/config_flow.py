@@ -15,6 +15,12 @@ prematurely, before the newest task ever gets a chance to finish). The
 trade-off: the QR shown to the user is a single snapshot and won't visually
 rotate during the wait, since HA has no supported way to update
 description_placeholders mid-task without re-triggering that same bug.
+
+The same progress step also links to BankID on the same device (a phone or
+tablet running the HA app or a browser): the autostart token from
+start_bankid_auth() goes into BankID's universal link. With redirect=null
+BankID doesn't open anything when it's done; the user switches back to HA
+and the poll task, which kept running meanwhile, finishes the step.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ import logging
 import re
 import uuid
 from typing import Any
+from urllib.parse import quote
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
@@ -72,6 +79,20 @@ def _qr_markdown(svg: str) -> str:
     return f"![BankID QR code]({qr_data_uri(svg)})"
 
 
+def bankid_autostart_url(token: str) -> str:
+    """Open the BankID app on this phone/tablet (BankID's universal link, what their docs say to use on mobile).
+
+    redirect=null: BankID returns to nothing when done, the user switches back to HA (Android
+    usually goes back by itself). The login is polled server-side the whole time, so that's enough.
+    """
+    return f"https://app.bankid.com/?autostarttoken={quote(token, safe='')}&redirect=null"
+
+
+def bankid_autostart_desktop_url(token: str) -> str:
+    """The same for BankID on a computer, which only answers to the bankid:/// scheme."""
+    return f"bankid:///?autostarttoken={quote(token, safe='')}&redirect=null"
+
+
 def is_authenticated(status: dict[str, Any]) -> bool:
     return status.get("status") == "authenticated successfully"
 
@@ -106,6 +127,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         self._matches: list[dict[str, Any]] = []
         self._selected: dict[str, Any] = {}
         self._qr_svg: str = ""
+        self._autostart_token: str | None = None
         self._bankid_task: asyncio.Task[dict[str, Any]] | None = None
         self._bankid_qr_expired: bool = False
 
@@ -151,8 +173,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             await self._client.set_address(self._selected["plant_id"])
             if not user_input.get("enable_bankid", False):
                 return self._create_entry()
-            auth = await self._client.start_bankid_auth()
-            self._qr_svg = auth.get("qr", "")
+            self._remember_bankid_order(await self._client.start_bankid_auth())
             return await self.async_step_bankid_wait()
         schema = vol.Schema({vol.Optional("enable_bankid", default=False): bool})
         return self.async_show_form(step_id="bankid_start", data_schema=schema)
@@ -190,16 +211,25 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             if asyncio.get_event_loop().time() >= deadline:
                 raise VafabMiljoTimeoutError("BankID login was never confirmed")
 
+    def _remember_bankid_order(self, auth: dict[str, Any]) -> None:
+        self._qr_svg = auth.get("qr") or ""
+        self._autostart_token = auth.get("token") or None
+
     async def _async_bankid_wait(
         self, *, step_id: str, failure_step_id: str, success_step_id: str, catch: type[Exception]
     ) -> ConfigFlowResult:
         if self._bankid_task is None:
             self._bankid_task = self.hass.async_create_task(self._poll_bankid_until_done())
         if not self._bankid_task.done():
+            placeholders = {"qr_code": _qr_markdown(self._qr_svg)}
+            if self._autostart_token:
+                # the link text is translated; only the URL is a placeholder (hassfest wants no URLs in strings)
+                placeholders["autostart_url"] = bankid_autostart_url(self._autostart_token)
             return self.async_show_progress(
                 step_id=step_id,
-                progress_action="waiting_for_bankid",
-                description_placeholders={"qr_code": _qr_markdown(self._qr_svg)},
+                # without a token there's nothing to open on this device: QR only
+                progress_action="waiting_for_bankid" if self._autostart_token else "waiting_for_bankid_qr",
+                description_placeholders=placeholders,
                 progress_task=self._bankid_task,
             )
         task, self._bankid_task = self._bankid_task, None
@@ -250,8 +280,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
                 entry.data[CONF_DEVICE_BEARER],
             )
         if user_input is not None:
-            auth = await self._client.start_bankid_auth()
-            self._qr_svg = auth.get("qr", "")
+            self._remember_bankid_order(await self._client.start_bankid_auth())
             return await self.async_step_reauth_bankid_wait()
         errors = {}
         if self._bankid_qr_expired:

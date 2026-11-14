@@ -20,6 +20,8 @@ from vafabmiljo.config_flow import (
     VafabMiljoConfigFlow,
     VafabMiljoOptionsFlow,
     _qr_markdown,
+    bankid_autostart_desktop_url,
+    bankid_autostart_url,
     is_authenticated,
 )
 
@@ -143,6 +145,65 @@ async def test_bankid_start_enabled_moves_to_wait(hass, mock_client):
     await _settle(flow._bankid_task)
     result2 = await flow.async_step_bankid_wait()
     assert result2 == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "finish"}
+
+
+async def test_bankid_wait_links_to_bankid_on_this_device(hass, mock_client):
+    # The autostart token from start_bankid_auth() goes into BankID's universal link, so a phone
+    # running the HA app can open BankID itself instead of scanning its own screen.
+    mock_client.start_bankid_auth.return_value = {"qr": "<svg>first</svg>", "token": "auto-123"}
+    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
+    flow = _make_flow(hass, mock_client)
+    flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
+
+    result = await flow.async_step_bankid_start({"enable_bankid": True})
+
+    assert result["type"] == FlowResultType.SHOW_PROGRESS
+    assert result["progress_action"] == "waiting_for_bankid"
+    placeholders = result["description_placeholders"]
+    assert placeholders["autostart_url"] == "https://app.bankid.com/?autostarttoken=auto-123&redirect=null"
+    assert placeholders["qr_code"].startswith("![BankID QR code](data:image/svg+xml;base64,")
+
+    # the poll keeps running while the user is in the BankID app and finishes the flow
+    await _settle(flow._bankid_task)
+    assert await flow.async_step_bankid_wait() == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "finish"}
+
+
+async def test_bankid_wait_without_token_shows_only_the_qr(hass, mock_client):
+    mock_client.start_bankid_auth.return_value = {"qr": "<svg/>", "token": None}
+    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
+    flow = _make_flow(hass, mock_client)
+    flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
+
+    result = await flow.async_step_bankid_start({"enable_bankid": True})
+
+    assert result["progress_action"] == "waiting_for_bankid_qr"
+    assert "autostart_url" not in result["description_placeholders"]
+    await _settle(flow._bankid_task)
+
+
+async def test_reauth_links_to_bankid_on_this_device(hass, mock_client):
+    mock_client.start_bankid_auth.return_value = {"qr": "<svg/>", "token": "re-tok"}
+    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
+    flow = _make_flow(hass)
+    flow._reauth_entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
+
+    result = await flow.async_step_reauth_confirm({})
+
+    assert result["step_id"] == "reauth_bankid_wait"
+    assert result["progress_action"] == "waiting_for_bankid"
+    assert result["description_placeholders"]["autostart_url"] == (
+        "https://app.bankid.com/?autostarttoken=re-tok&redirect=null"
+    )
+    await _settle(flow._bankid_task)
+    assert await flow.async_step_reauth_bankid_wait() == {
+        "type": FlowResultType.SHOW_PROGRESS_DONE,
+        "next_step_id": "reauth_finish",
+    }
+
+
+def test_autostart_urls_escape_the_token():
+    assert bankid_autostart_url("a b&c") == "https://app.bankid.com/?autostarttoken=a%20b%26c&redirect=null"
+    assert bankid_autostart_desktop_url("a/b") == "bankid:///?autostarttoken=a%2Fb&redirect=null"
 
 
 async def test_bankid_wait_reenters_before_task_done_shows_same_task(hass, mock_client):
