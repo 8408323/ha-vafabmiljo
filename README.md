@@ -82,7 +82,8 @@ Available in English and Swedish, matching HA's own language setting.
   Finnish, Icelandic, English
 - **BankID login from the panel** (Settings → Account): scan the QR or open BankID on the same
   phone. Setup no longer asks for BankID by default; connect (or log in again when the session
-  has expired) from the panel whenever you want invoices and fees
+  has expired) from the panel whenever you want invoices and fees. The setup and
+  reauthentication dialogs also have an **Open BankID on this device** link next to the QR
 - **Notifications per recipient**, set up in the panel (Settings → Notifications from Home
   Assistant): pick a phone (or any notify service), whether it gets the pickup reminder
   (the evening before or the same morning, at its own time), new invoices and invoice-due
@@ -103,13 +104,23 @@ Account data uses **Swedish BankID**, same as the app. Log in from the panel:
 
 1. Open **VafabMiljö** in the sidebar → **Settings** → **Account (BankID)**.
 2. Click **Log in with BankID** (or **Log in again**). A dialog shows a QR code.
-3. Scan it with the BankID app. On a phone, tap **Open BankID on this device** instead.
+3. Scan it with the BankID app on another device. **On a phone or tablet**, tap **Open BankID
+   on this device** instead: BankID opens on the same device, you approve there and switch
+   back to Home Assistant (the app or the browser).
 4. When BankID confirms, the dialog says you're logged in and the integration reloads
    with your invoices, fees and property. The QR rotates while you wait; if it expires
    (about 30 seconds) just click **Try again**.
 
 Only Home Assistant administrators can start a login. You can also connect BankID in the
-setup dialog when adding the integration, but the panel is the easier way.
+setup dialog when adding the integration, or answer Home Assistant's reauthentication prompt
+when the login has expired. Both show the QR code and an **Open BankID on this device** link,
+so they work from the phone too. After you approve in BankID, switch back to Home Assistant
+and the dialog continues by itself.
+
+The same-device link is BankID's universal link (`https://app.bankid.com/?autostarttoken=…&redirect=null`).
+The panel uses `bankid:///` on a computer, which is what BankID for desktop answers to.
+`redirect=null` means BankID doesn't send you anywhere afterwards. On Android it usually
+goes back to Home Assistant by itself; on iPhone, switch back yourself.
 
 **When the login expires.** BankID sessions expire after a while. The integration then:
 

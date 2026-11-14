@@ -54,7 +54,9 @@ async def test_login_saves_the_cookie_and_reloads(setup):
     await ws_start(s.hass, s.conn, {"id": 1, "entry_id": s.entry.entry_id})
     first = _result(s)
     assert first["status"] == "waiting" and first["qr"].startswith("data:image/svg+xml;base64,")
-    assert first["autostart"] == "bankid:///?autostarttoken=tok&redirect=null"
+    # universal link for phones/tablets, the bankid:/// scheme for BankID on a computer
+    assert first["autostart"] == "https://app.bankid.com/?autostarttoken=tok&redirect=null"
+    assert first["autostart_desktop"] == "bankid:///?autostarttoken=tok&redirect=null"
 
     await s.hass.data[KEY][s.entry.entry_id].task
     ws_status(s.hass, s.conn, {"id": 2, "entry_id": s.entry.entry_id})

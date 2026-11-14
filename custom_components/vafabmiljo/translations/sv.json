@@ -21,7 +21,7 @@
         }
       },
       "reauth_confirm": {
-        "description": "Din BankID-session hos VafabMiljö har gått ut. Logga in igen för att fortsätta få uppdaterade fakturor och avtalsdata."
+        "description": "Din BankID-session hos VafabMiljö har gått ut. Logga in igen för att fortsätta få uppdaterade fakturor och avtalsdata. Nästa steg visar en QR-kod och en länk som öppnar BankID på den här enheten."
       },
       "reconfigure": {
         "description": "Sök efter den nya adressen att koppla till denna post.",
@@ -37,12 +37,13 @@
       }
     },
     "progress": {
-      "waiting_for_bankid": "Öppna BankID-appen och skanna denna QR-kod:\n\n{qr_code}"
+      "waiting_for_bankid": "### [Öppna BankID på den här enheten]({autostart_url})\n\n**På telefonen eller surfplattan:** tryck på länken, godkänn i BankID-appen och gå sedan tillbaka till Home Assistant. Inloggningen fortsätter av sig själv.\n\n**På en annan enhet:** öppna BankID-appen och skanna denna QR-kod:\n\n{qr_code}",
+      "waiting_for_bankid_qr": "Öppna BankID-appen och skanna denna QR-kod:\n\n{qr_code}"
     },
     "error": {
       "cannot_connect": "Det gick inte att nå VafabMiljö. Försök igen.",
       "no_matches": "Ingen adress matchade sökningen.",
-      "qr_expired": "QR-koden hann gå ut innan den skannades. Skicka igen för en ny."
+      "qr_expired": "BankID-inloggningen gick ut innan den godkändes. Skicka igen för att starta en ny."
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured%]",

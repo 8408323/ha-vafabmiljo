@@ -21,7 +21,7 @@
         }
       },
       "reauth_confirm": {
-        "description": "Your VafabMiljö BankID session expired. Sign in again to keep invoices and contract data updating."
+        "description": "Your VafabMiljö BankID session expired. Sign in again to keep invoices and contract data updating. The next step shows a QR code and a link that opens BankID on this device."
       },
       "reconfigure": {
         "description": "Search for the new address to bind this entry to.",
@@ -37,12 +37,13 @@
       }
     },
     "progress": {
-      "waiting_for_bankid": "Open the BankID app and scan this QR code:\n\n{qr_code}"
+      "waiting_for_bankid": "### [Open BankID on this device]({autostart_url})\n\n**On this phone or tablet:** tap the link, approve in the BankID app, then switch back to Home Assistant. The login continues by itself.\n\n**On another device:** open the BankID app and scan this QR code:\n\n{qr_code}",
+      "waiting_for_bankid_qr": "Open the BankID app and scan this QR code:\n\n{qr_code}"
     },
     "error": {
       "cannot_connect": "Failed to reach VafabMiljö. Please try again.",
       "no_matches": "No address matched that search.",
-      "qr_expired": "The QR code expired before it was scanned. Submit again for a new one."
+      "qr_expired": "The BankID login expired before it was approved. Submit again to start a new one."
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured%]",

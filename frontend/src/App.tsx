@@ -286,7 +286,10 @@ function Settings({ a, hass, t, lang, setLang }: Ctx & { a: Addr; lang: string |
 }
 
 /* ---------------- BankID login ---------------- */
-type Login = { status: "waiting" | "done" | "failed" | "none"; qr?: string | null; autostart?: string | null };
+type Login = { status: "waiting" | "done" | "failed" | "none"; qr?: string | null; autostart?: string | null; autostart_desktop?: string | null };
+// BankID wants its universal link (https://app.bankid.com) on phones and tablets and bankid:/// on a computer.
+// iPadOS reports itself as a Mac, so a touch screen on a "Mac" counts as a tablet.
+const MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 function Account({ a, hass, t }: { a: Addr; hass: any; t: T }) {
   const [login, setLogin] = useState<Login | null>(null);
@@ -321,11 +324,17 @@ function Account({ a, hass, t }: { a: Addr; hass: any; t: T }) {
         <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && close()}>
           <div className="modal card login" role="dialog" aria-modal="true" aria-label={t.login}>
             <h2>{t.login}</h2>
-            {login.status === "waiting" && <>
-              <div className="muted">{t.scan_qr}</div>
-              {login.qr && <img className="qr" src={login.qr} alt="BankID QR" />}
-              {login.autostart && <a className="btn" href={login.autostart}>{t.open_on_device}</a>}
-            </>}
+            {login.status === "waiting" && (() => {
+              const href = MOBILE ? login.autostart : login.autostart_desktop ?? login.autostart;
+              // on a phone the same-device button comes first and is the primary one; the QR is for another device
+              const open = href && <a className={MOBILE ? "btn primary" : "btn"} href={href}>{t.open_on_device}</a>;
+              return <>
+                {MOBILE && open}
+                <div className="muted">{t.scan_qr}</div>
+                {login.qr && <img className="qr" src={login.qr} alt="BankID QR" />}
+                {!MOBILE && open}
+              </>;
+            })()}
             {login.status === "done" && <div className="pos">✓ {t.login_done}</div>}
             {(login.status === "failed" || login.status === "none") && <div className="neg">{t.login_failed}</div>}
             <div className="modal-actions">
