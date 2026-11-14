@@ -46,9 +46,9 @@
       "qr_expired": "BankID-inloggningen gick ut innan den godkändes. Skicka igen för att starta en ny."
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured%]",
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
-      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      "already_configured": "Den här adressen är redan tillagd i Home Assistant.",
+      "reauth_successful": "Inloggad igen med BankID. Fakturor och avgifter uppdateras strax.",
+      "reconfigure_successful": "Adressen har ändrats."
     }
   },
   "options": {

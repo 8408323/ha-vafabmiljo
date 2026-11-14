@@ -46,9 +46,9 @@
       "qr_expired": "The BankID login expired before it was approved. Submit again to start a new one."
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured%]",
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
-      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      "already_configured": "This address is already set up in Home Assistant.",
+      "reauth_successful": "Logged in again with BankID. Invoices and fees will update shortly.",
+      "reconfigure_successful": "The address has been changed."
     }
   },
   "options": {
