@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import aioresponses.core as aioresponses_core
 import pytest
-from aiohttp import ClientConnectionError, ClientSession
+from aiohttp import ClientConnectionError, ClientResponse, ClientSession
 from aioresponses import aioresponses
 from vafabmiljo.api import (
     API_BASE,
@@ -14,6 +17,19 @@ from vafabmiljo.api import (
 )
 from vafabmiljo.const import APP_VERSION
 from yarl import URL
+
+
+class _MockedClientResponse(ClientResponse):
+    """aioresponses 0.7.9 builds its fake responses without the stream_writer that aiohttp >= 3.10 requires."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("stream_writer", SimpleNamespace(output_size=0))
+        super().__init__(*args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _aioresponses_compat(monkeypatch):
+    monkeypatch.setattr(aioresponses_core, "ClientResponse", _MockedClientResponse)
 
 
 @pytest.fixture
