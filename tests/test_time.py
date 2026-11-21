@@ -151,3 +151,23 @@ async def test_reminder_time_unavailable_while_the_session_is_expired():
     assert entity.available is False
     listener()
     assert entity.state_writes == 1
+
+
+async def test_reminder_time_ignores_an_unavailable_restored_state():
+    # saved while the BankID session was expired; parsing it used to raise and the entity was never added
+    for saved in ("unavailable", "unknown"):
+        entity = VafabMiljoReminderTimeEntity(_coordinator(authenticated=True), _entry())
+        entity.async_get_last_state = AsyncMock(return_value=SimpleNamespace(state=saved))
+
+        await entity.async_added_to_hass()
+
+        assert entity.native_value == DEFAULT_REMINDER_TIME
+
+
+async def test_notify_time_ignores_an_unknown_restored_state():
+    entity = VafabMiljoNotifyTimeEntity(_entry())
+    entity.async_get_last_state = AsyncMock(return_value=SimpleNamespace(state="unknown"))
+
+    await entity.async_added_to_hass()
+
+    assert entity.native_value == DEFAULT_NOTIFY_TIME

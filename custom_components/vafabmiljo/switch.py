@@ -13,6 +13,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -57,8 +58,9 @@ class VafabMiljoNotificationSwitch(SwitchEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.async_on_remove(self._coordinator.async_add_listener(self.async_write_ha_state))
-        if (last_state := await self.async_get_last_state()) is not None:
-            self._attr_is_on = last_state.state == "on"
+        # only a real on/off: "unavailable" (saved while the BankID session was expired) must not turn into off
+        if (last_state := await self.async_get_last_state()) is not None and last_state.state in (STATE_ON, STATE_OFF):
+            self._attr_is_on = last_state.state == STATE_ON
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._coordinator.client.update_settings({self._field: True})
