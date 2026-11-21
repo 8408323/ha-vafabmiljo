@@ -224,3 +224,85 @@ async def test_a_working_login_clears_the_repair():
     coordinator.hass.data["_issues"] = {("vafabmiljo", "bankid_expired_test_entry"): {}}
     await coordinator._async_update_data()
     assert coordinator.hass.data["_issues"] == {}
+
+
+def _keep_alive_coordinator(client, *, cookie_in_entry="abc123", expired=False) -> VafabMiljoCoordinator:
+    hass = HomeAssistant()
+    entry = ConfigEntry(data={"session_cookie": cookie_in_entry})
+    coordinator = VafabMiljoCoordinator(hass, entry, client)
+    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, session_expired=expired)
+    return coordinator
+
+
+async def test_keep_alive_tick_pings_the_backend():
+    client = _authenticated_client()
+    coordinator = _keep_alive_coordinator(client)
+
+    await coordinator._async_keep_alive()
+
+    client.keep_alive.assert_awaited_once()
+    assert coordinator.hass.config_entries.updates == []  # cookie unchanged: nothing saved
+
+
+async def test_keep_alive_tick_saves_a_rotated_cookie():
+    client = _authenticated_client()
+    coordinator = _keep_alive_coordinator(client)
+
+    async def _rotate():
+        client.session_cookie = "rotated"
+
+    client.keep_alive = AsyncMock(side_effect=_rotate)
+    await coordinator._async_keep_alive()
+
+    assert coordinator.entry.data["session_cookie"] == "rotated"
+    assert coordinator.is_own_entry_update(coordinator.entry)
+
+
+async def test_keep_alive_tick_leaves_a_cookie_from_a_new_login_alone():
+    client = _authenticated_client()
+    coordinator = _keep_alive_coordinator(client)
+    coordinator.entry.data = {"session_cookie": "from-panel-login"}  # saved meanwhile; a reload follows
+    client.session_cookie = "rotated-old-session"
+
+    await coordinator._async_keep_alive()
+
+    assert coordinator.entry.data["session_cookie"] == "from-panel-login"
+    assert not coordinator.is_own_entry_update(coordinator.entry)
+
+
+async def test_keep_alive_tick_skips_an_expired_or_missing_session():
+    client = _authenticated_client()
+    await _keep_alive_coordinator(client, expired=True)._async_keep_alive()
+    client.session_cookie = None
+    await _keep_alive_coordinator(client)._async_keep_alive()
+
+    client.keep_alive.assert_not_awaited()
+
+
+async def test_keep_alive_tick_rejected_runs_the_expiry_handling():
+    client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
+    coordinator = _keep_alive_coordinator(client)
+
+    await coordinator._async_keep_alive()
+
+    # the refresh it triggered marked the session expired and asked for a new login
+    assert coordinator.data.session_expired is True
+    assert coordinator.entry.reauth_started == 1
+
+
+async def test_keep_alive_tick_tolerates_a_network_error():
+    client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoError("boom")))
+    coordinator = _keep_alive_coordinator(client)
+
+    await coordinator._async_keep_alive()
+
+    assert coordinator.data.session_expired is False
+
+
+async def test_refresh_saves_a_rotated_cookie():
+    client = _authenticated_client()
+    coordinator = _keep_alive_coordinator(client, cookie_in_entry="old")
+
+    await coordinator._async_update_data()
+
+    assert coordinator.entry.data["session_cookie"] == "abc123"

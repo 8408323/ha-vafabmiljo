@@ -119,6 +119,22 @@ def _install_stub_homeassistant() -> None:
             # (action, when) pairs registered via async_track_point_in_time
             self.scheduled_timers: list[tuple[Any, Any]] = []
             self.static_paths: list[Any] = []
+            # (action, interval) pairs registered via async_track_time_interval
+            self.interval_listeners: list[tuple[Any, Any]] = []
+
+            class _ConfigEntries:
+                def __init__(self) -> None:
+                    self.updates: list[tuple[Any, dict[str, Any]]] = []
+
+                def async_update_entry(self, entry, *, data=None, options=None) -> bool:
+                    if data is not None:
+                        entry.data = data
+                        self.updates.append((entry, data))
+                    if options is not None:
+                        entry.options = options
+                    return True
+
+            self.config_entries = _ConfigEntries()
 
             async def _register_static_paths(configs) -> None:
                 self.static_paths.extend(configs)
@@ -138,6 +154,7 @@ def _install_stub_homeassistant() -> None:
         return func
 
     core.HomeAssistant = HomeAssistant
+    core.CALLBACK_TYPE = Any
     core.Event = Event
     core.CoreState = CoreState
     core.callback = callback
@@ -268,7 +285,13 @@ def _install_stub_homeassistant() -> None:
     def async_get_clientsession(hass):
         return hass.data["test_session"]
 
+    def async_create_clientsession(hass, **kwargs):
+        # records the kwargs (the integration must ask for a session without a cookie jar)
+        hass.data.setdefault("created_sessions", []).append(kwargs)
+        return hass.data["test_session"]
+
     aiohttp_client.async_get_clientsession = async_get_clientsession
+    aiohttp_client.async_create_clientsession = async_create_clientsession
     sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client
 
     selector_mod = types.ModuleType("homeassistant.helpers.selector")
@@ -368,7 +391,18 @@ def _install_stub_homeassistant() -> None:
         hass.time_listeners.append(item)
         return lambda: hass.time_listeners.remove(item)
 
+    def async_track_time_interval(hass, action, interval, *, name=None, cancel_on_shutdown=None):
+        item = (action, interval)
+        hass.interval_listeners.append(item)
+
+        def _unsub() -> None:
+            if item in hass.interval_listeners:
+                hass.interval_listeners.remove(item)
+
+        return _unsub
+
     event_mod.async_track_time_change = async_track_time_change
+    event_mod.async_track_time_interval = async_track_time_interval
     event_mod.async_call_later = async_call_later
     event_mod.async_track_point_in_time = async_track_point_in_time
     sys.modules["homeassistant.helpers.event"] = event_mod

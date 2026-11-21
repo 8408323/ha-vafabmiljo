@@ -122,6 +122,12 @@ The panel uses `bankid:///` on a computer, which is what BankID for desktop answ
 `redirect=null` means BankID doesn't send you anywhere afterwards. On Android it usually
 goes back to Home Assistant by itself; on iPhone, switch back yourself.
 
+**Staying logged in.** While a BankID session is active the integration calls the backend's
+keep-alive every 2 minutes (independently of the refresh interval), and saves the session
+cookie whenever the backend renews it, so a restart picks up the live session. It talks to the
+backend through its own HTTP session without a shared cookie jar, so several addresses, a setup
+or a login can't swap each other's sessions.
+
 **When the login expires.** BankID sessions expire after a while. The integration then:
 
 - keeps the pickup sensors, calendar and pickup reminders working (they need no login),

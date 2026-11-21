@@ -62,6 +62,12 @@ PENDING_POLL_TIMEOUT = 30
 BANKID_POLL_INTERVAL = 2
 BANKID_POLL_TIMEOUT = 300
 
+# How often the BankID session is kept alive (GET /authenticate/keep-alive), apart from the data
+# refresh. The backend's idle timeout isn't known - it is shorter than the default 30-minute
+# refresh, which let the session lapse between refreshes - so this pings well inside any plausible
+# timeout. One small GET per entry, only while a BankID session is active.
+KEEP_ALIVE_INTERVAL_SECONDS = 120
+
 # Options-flow key: user-configurable poll interval, in minutes.
 CONF_SCAN_INTERVAL = "scan_interval"
 DEFAULT_SCAN_INTERVAL_MINUTES = 30  # this is a waste-collection calendar, not live data

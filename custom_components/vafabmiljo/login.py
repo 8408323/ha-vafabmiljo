@@ -14,7 +14,6 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import VafabMiljoClient, VafabMiljoError
 from .config_flow import (
@@ -32,6 +31,7 @@ from .const import (
     CONF_SESSION_COOKIE,
     DOMAIN,
 )
+from .session import async_create_session
 
 KEY = f"{DOMAIN}_logins"
 
@@ -42,7 +42,7 @@ class PanelLogin:
         self._entry = entry
         # a fresh client without the old cookie: the login must not ride on an expired session
         self._client = VafabMiljoClient(
-            async_get_clientsession(hass), entry.data[CONF_DEVICE_UUID], entry.data[CONF_DEVICE_BEARER]
+            async_create_session(hass), entry.data[CONF_DEVICE_UUID], entry.data[CONF_DEVICE_BEARER]
         )
         self.status = "waiting"  # waiting / done / failed
         self.hint: str | None = None
