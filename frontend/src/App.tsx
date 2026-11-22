@@ -1,6 +1,27 @@
-import { useEffect, useState } from "react";
+import { Component, ReactNode, Suspense, lazy, useEffect, useState } from "react";
 import House, { SceneBin, binColor } from "./House";
 import { LANGS, T, pick } from "./i18n";
+
+// three.js is a separate chunk: the isometric SVG shows at once, the 3D scene replaces it once loaded, and the SVG
+// stays when WebGL (or the chunk) isn't available
+const House3D = lazy(() => import("./House3D"));
+class Fallback extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+function Scene({ bins, truck, dark }: { bins: SceneBin[]; truck: boolean; dark: boolean }) {
+  const [noGl, setNoGl] = useState(false);
+  const flat = <House bins={bins} truck={truck} />;
+  if (noGl) return flat;
+  return (
+    <Fallback fallback={flat}>
+      <Suspense fallback={flat}>
+        <House3D bins={bins} truck={truck} dark={dark} accent={dark ? "#44c486" : "#1d7a4c"} onFail={() => setNoGl(true)} />
+      </Suspense>
+    </Fallback>
+  );
+}
 
 // Everything comes from the integration's own entities (entity registry + states), so the panel shows exactly
 // what automations see. Only the notification recipients have their own websocket API (reminders.py).
@@ -16,6 +37,17 @@ const TABS = ["overview", "invoices", "settings"] as const;
 type Theme = "auto" | "light" | "dark";
 type Tab = (typeof TABS)[number];
 const PAID = new Set(["helt betald"]);  // same as const.PAID_STATUSES
+
+// A readable text for whatever a websocket call or service rejects with: an Error, HA's {code, message},
+// a bare error code (e.g. 3 = connection lost) - never "[object Object]"
+function errText(e: any): string {
+  if (typeof e === "string") return e;
+  if (typeof e === "number") return e === 3 ? "Connection to Home Assistant lost" : `Error ${e}`;
+  const msg = e?.message ?? e?.error?.message ?? e?.body?.message;
+  if (typeof msg === "string" && msg) return msg;
+  if (typeof e?.code === "string" || typeof e?.code === "number") return `Error: ${e.code}`;
+  try { return JSON.stringify(e); } catch { return String(e); }
+}
 
 const fmt = (v: number | null | undefined, d = 0, u = "") =>
   v == null || Number.isNaN(v) ? "–" : `${v.toLocaleString("sv-SE", { minimumFractionDigits: d, maximumFractionDigits: d })}${u ? " " + u : ""}`;
@@ -198,7 +230,7 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
         {!a ? <div className="card">{hass.entities ? t.none : t.loading}</div> : (
           <>
             <LoginBanner li={li} t={t} onLogin={onLogin} />
-            {tab === "overview" && <Overview {...ctx} a={a} />}
+            {tab === "overview" && <Overview {...ctx} a={a} dark={dark} />}
             {tab === "invoices" && <Invoices {...ctx} a={a} />}
             {tab === "settings" && <Settings {...ctx} a={a} li={li} onLogin={onLogin} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} />}
           </>
@@ -210,7 +242,7 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
 }
 
 /* ---------------- Overview ---------------- */
-function Overview({ a, ...ctx }: Ctx & { a: Addr }) {
+function Overview({ a, dark, ...ctx }: Ctx & { a: Addr; dark: boolean }) {
   const { t, locale } = ctx;
   const bins = a.pickups.map((s) => ({ type: s.attributes.bin_type ?? short(s, a), ...when(s.state, ctx) }));
   const first = Math.min(...bins.map((b) => b.days ?? Infinity));
@@ -230,7 +262,7 @@ function Overview({ a, ...ctx }: Ctx & { a: Addr }) {
       </div>
       <div className="grid-overview">
         <div className="card scene">
-          <House bins={scene} truck={now.length > 0} />
+          <Scene bins={scene} truck={now.length > 0} dark={dark} />
           {/* same left-to-right order as the bins in the drawing */}
           <div className="bin-tags">{scene.map((b) => (
             <div key={b.type} className={`bin-tag ${b.next ? "next" : ""}`}>
@@ -313,7 +345,7 @@ function Invoices({ a, hass, t, locale }: Ctx & { a: Addr }) {
       const r = await hass.callService("vafabmiljo", "download_invoice", { invoice_id: id }, undefined, false, true);
       if (w) w.location.href = r.response.path; else window.location.href = r.response.path;
       setErr(null);
-    } catch (e: any) { w?.close(); setErr(`${t.download_failed}: ${e?.message ?? e}`); }
+    } catch (e: any) { w?.close(); setErr(`${t.download_failed}: ${errText(e)}`); }
   };
 
   const unpaid = invoices.filter((i) => !isPaid(i));
@@ -446,7 +478,7 @@ function useLogin(entryId: string | undefined, hass: any): LoginCtl {
   const start = async () => {
     setErr(null);
     setLogin({ status: "waiting" });
-    try { setLogin(await send("vafabmiljo/login/start")); } catch (e: any) { setLogin({ status: "failed" }); setErr(e?.message ?? String(e)); }
+    try { setLogin(await send("vafabmiljo/login/start")); } catch (e: any) { setLogin({ status: "failed" }); setErr(errText(e)); }
   };
   const close = () => { if (login?.status === "waiting") send("vafabmiljo/login/cancel").catch(() => undefined); setLogin(null); setErr(null); };
   return { login, err, start, close };
@@ -549,15 +581,24 @@ function Recipients({ a, hass, t }: { a: Addr; hass: any; t: T }) {
 
   useEffect(() => {
     if (!a.entryId || !admin) return;  // the recipient list (people's phones) is admin-only
-    hass.connection.sendMessagePromise({ type: "vafabmiljo/notify/get", entry_id: a.entryId })
-      .then((r: any) => { setList(r.recipients); setServices(r.services); }).catch((e: any) => setErr(e?.message ?? String(e)));
-  }, [a.entryId]);
+    // retried: right after a Home Assistant restart (or while the integration reloads) the command isn't there yet
+    let stop = false, timer: number | undefined;
+    const load = (attempt: number) => hass.connection.sendMessagePromise({ type: "vafabmiljo/notify/get", entry_id: a.entryId })
+      .then((r: any) => { if (stop) return; setList(r.recipients); setServices(r.services); setErr(null); })
+      .catch((e: any) => {
+        if (stop) return;
+        if (attempt < 5) timer = window.setTimeout(() => load(attempt + 1), 1500 * (attempt + 1));
+        else setErr(errText(e));
+      });
+    load(0);
+    return () => { stop = true; window.clearTimeout(timer); };
+  }, [a.entryId, hass.connection]);
 
   const save = async (next: Recipient[]) => {
     try {
       const r = await hass.connection.sendMessagePromise({ type: "vafabmiljo/notify/set", entry_id: a.entryId, recipients: next });
       setList(r.recipients); setEdit(null); setErr(null);
-    } catch (e: any) { setErr(e?.message ?? String(e)); }
+    } catch (e: any) { setErr(errText(e)); }
   };
   const summary = (r: Recipient) => [
     r.pickup && `${t.pickup_reminder}: ${(r.pickup_days_before ? t.evening_before : t.same_morning).toLowerCase()} ${t.at} ${r.pickup_time}`,
