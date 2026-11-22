@@ -1,9 +1,9 @@
 """VafabMiljö time entities: the app's own reminder time, and a local-only one.
 
 VafabMiljoReminderTimeEntity mirrors the app's own "Klockslag för
-påminnelsenotiser" (30-minute increments) picker - optimistic/restore-on-
-restart like switch.py, since there's no GET endpoint for current settings,
-only POST /settings which just echoes back the patch's result.
+påminnelsenotiser" (30-minute increments) picker - read from GET /settings
+on every refresh like switch.py, falling back to its own last value (restored
+across restarts) until a refresh has it.
 
 VafabMiljoNotifyTimeEntity is unrelated to the app or BankID entirely: a
 purely local time value for the user's own automations to trigger HA-side
@@ -81,6 +81,16 @@ class VafabMiljoReminderTimeEntity(TimeEntity, RestoreEntity):
         self._attr_native_value = DEFAULT_REMINDER_TIME
 
     @property
+    def native_value(self) -> time | None:
+        raw = (self._coordinator.data.settings or {}).get(REMINDER_TIME_FIELD)
+        if isinstance(raw, str):
+            try:
+                return time.fromisoformat(raw)
+            except ValueError:
+                pass
+        return self._attr_native_value
+
+    @property
     def available(self) -> bool:
         # the backend rejects settings changes while the BankID session is expired
         return not self._coordinator.data.session_expired
@@ -93,6 +103,7 @@ class VafabMiljoReminderTimeEntity(TimeEntity, RestoreEntity):
 
     async def async_set_value(self, value: time) -> None:
         await self._coordinator.client.update_settings({REMINDER_TIME_FIELD: value.strftime("%H:%M")})
+        self._coordinator.async_apply_setting(REMINDER_TIME_FIELD, value.strftime("%H:%M"))
         self._attr_native_value = value
         self.async_write_ha_state()
 

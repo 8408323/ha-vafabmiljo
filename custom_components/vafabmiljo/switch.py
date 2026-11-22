@@ -1,10 +1,9 @@
 """VafabMiljö notification-preference switches.
 
-There's no GET endpoint for the current settings - only POST /settings, which
-both applies a patch and echoes back the full resulting state. So these are
-optimistic, restore-on-restart entities (same pattern used in ha-plejd for
-device-side state with no read-back): we trust our own last command rather
-than polling for ground truth.
+The current values come from GET /settings on every refresh (the device's
+own settings, as the app shows them); POST /settings changes them. Until the
+first refresh has them - or if that endpoint fails - the entity falls back to
+its own last command, restored across restarts.
 """
 
 from __future__ import annotations
@@ -51,6 +50,11 @@ class VafabMiljoNotificationSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True  # matches the backend's own default for a new device
 
     @property
+    def is_on(self) -> bool | None:
+        value = (self._coordinator.data.settings or {}).get(self._field)
+        return value if isinstance(value, bool) else self._attr_is_on
+
+    @property
     def available(self) -> bool:
         # the backend rejects settings changes while the BankID session is expired
         return not self._coordinator.data.session_expired
@@ -64,10 +68,12 @@ class VafabMiljoNotificationSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._coordinator.client.update_settings({self._field: True})
+        self._coordinator.async_apply_setting(self._field, True)
         self._attr_is_on = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._coordinator.client.update_settings({self._field: False})
+        self._coordinator.async_apply_setting(self._field, False)
         self._attr_is_on = False
         self.async_write_ha_state()

@@ -34,6 +34,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     return {
         "entry_data": async_redact_data(dict(entry.data), TO_REDACT),
         "authenticated": data.authenticated,
+        "no_customer": data.no_customer,
         "bin_types": bin_types,
         "invoice_count": len(data.invoice_items),
         "sanitation_contract_count": len((data.sanitation or {}).get("contracts", [])),

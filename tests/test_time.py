@@ -171,3 +171,32 @@ async def test_notify_time_ignores_an_unknown_restored_state():
     await entity.async_added_to_hass()
 
     assert entity.native_value == DEFAULT_NOTIFY_TIME
+
+
+async def test_reminder_time_follows_the_backend_settings():
+    coordinator = _coordinator(authenticated=True)
+    coordinator.data.settings = {"time": "07:30"}
+    entity = VafabMiljoReminderTimeEntity(coordinator, _entry())
+    entity.async_get_last_state = AsyncMock(return_value=SimpleNamespace(state="21:00"))
+
+    await entity.async_added_to_hass()
+
+    assert entity.native_value == time(7, 30)  # the backend's value wins over the restored one
+
+
+async def test_reminder_time_ignores_a_malformed_backend_value():
+    coordinator = _coordinator(authenticated=True)
+    coordinator.data.settings = {"time": "soon"}
+    entity = VafabMiljoReminderTimeEntity(coordinator, _entry())
+
+    assert entity.native_value == DEFAULT_REMINDER_TIME
+
+
+async def test_reminder_time_set_value_records_the_setting():
+    coordinator = _coordinator(authenticated=True)
+    entity = VafabMiljoReminderTimeEntity(coordinator, _entry())
+    entity.async_write_ha_state = Mock()
+
+    await entity.async_set_value(time(6, 0))
+
+    coordinator.async_apply_setting.assert_called_once_with("time", "06:00")

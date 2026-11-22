@@ -125,6 +125,10 @@
     "bankid_expired": {
       "title": "VafabMiljö: log in with BankID again",
       "description": "The BankID login for **{address}** has expired, so invoices and fees are no longer updated (pickup dates still are). Open the VafabMiljö panel (Learn more), go to **Settings → Account** and click **Log in again**."
+    },
+    "no_customer": {
+      "title": "VafabMiljö: no customer account for this BankID login",
+      "description": "VafabMiljö answers that the person who logged in with BankID for **{address}** has no customer data, so invoices, fees and orders can't be fetched (pickup dates still work). Log in with the person the subscription is registered to. If that's already the case and the VafabMiljö app shows no invoices either, contact VafabMiljö customer service - the account is then missing on their side. This message goes away by itself once VafabMiljö returns the customer data again."
     }
   }
 }

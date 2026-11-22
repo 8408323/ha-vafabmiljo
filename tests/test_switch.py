@@ -83,3 +83,25 @@ async def test_an_unavailable_restored_state_keeps_the_default_on():
     await switch.async_added_to_hass()
 
     assert switch.is_on is True
+
+
+async def test_follows_the_backend_settings():
+    coordinator = _coordinator(authenticated=True)
+    coordinator.data.settings = {"garbage": False}
+    switch = VafabMiljoNotificationSwitch(coordinator, _entry(), "garbage", "garbage")
+    switch.async_get_last_state = AsyncMock(return_value=SimpleNamespace(state="on"))
+
+    await switch.async_added_to_hass()
+
+    assert switch.is_on is False  # the backend's value wins over the restored one
+
+
+async def test_turning_off_records_the_setting():
+    coordinator = _coordinator(authenticated=True)
+    switch = VafabMiljoNotificationSwitch(coordinator, _entry(), "garbage", "garbage")
+    switch.async_write_ha_state = Mock()
+
+    await switch.async_turn_off()
+
+    coordinator.async_apply_setting.assert_called_once_with("garbage", False)
+    assert switch.is_on is False
