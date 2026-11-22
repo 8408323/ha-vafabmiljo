@@ -9,19 +9,13 @@
         }
       },
       "address": {
-        "description": "Välj din adress bland träffarna.",
+        "description": "Välj din adress bland träffarna. Fakturor, avgifter och fastighet kommer sedan: logga in på Mina sidor med BankID i VafabMiljö-panelen (Inställningar → Konto).",
         "data": {
           "plant_id": "Adress"
         }
       },
-      "bankid_start": {
-        "description": "Valfritt: anslut även ditt VafabMiljö-konto för att få fakturor och avgifter. Du kan hoppa över detta och göra det senare i VafabMiljö-panelen i sidomenyn (Inställningar → Logga in med BankID).",
-        "data": {
-          "enable_bankid": "Anslut med BankID"
-        }
-      },
       "reauth_confirm": {
-        "description": "Din BankID-session hos VafabMiljö har gått ut. Logga in igen för att fortsätta få uppdaterade fakturor och avtalsdata. Nästa steg visar en QR-kod och en länk som öppnar BankID på den här enheten."
+        "description": "Inloggningen till VafabMiljö Mina sidor har gått ut (den gäller 7 dagar). Öppna **VafabMiljö**-panelen i sidomenyn, gå till **Inställningar → Konto** och klicka **Logga in igen** - QR-koden och BankID-länken där hålls uppdaterade. Skicka för att stänga dialogen."
       },
       "reconfigure": {
         "description": "Sök efter den nya adressen att koppla till denna post.",
@@ -36,19 +30,14 @@
         }
       }
     },
-    "progress": {
-      "waiting_for_bankid": "### [Öppna BankID på den här enheten]({autostart_url})\n\n**På telefonen eller surfplattan:** tryck på länken, godkänn i BankID-appen och gå sedan tillbaka till Home Assistant. Inloggningen fortsätter av sig själv.\n\n**På en annan enhet:** öppna BankID-appen och skanna denna QR-kod:\n\n{qr_code}",
-      "waiting_for_bankid_qr": "Öppna BankID-appen och skanna denna QR-kod:\n\n{qr_code}"
-    },
     "error": {
       "cannot_connect": "Det gick inte att nå VafabMiljö. Försök igen.",
-      "no_matches": "Ingen adress matchade sökningen.",
-      "qr_expired": "BankID-inloggningen gick ut innan den godkändes. Skicka igen för att starta en ny."
+      "no_matches": "Ingen adress matchade sökningen."
     },
     "abort": {
       "already_configured": "Den här adressen är redan tillagd i Home Assistant.",
-      "reauth_successful": "Inloggad igen med BankID. Fakturor och avgifter uppdateras strax.",
-      "reconfigure_successful": "Adressen har ändrats."
+      "reconfigure_successful": "Adressen har ändrats.",
+      "reauth_use_panel": "Logga in igen från VafabMiljö-panelen (Inställningar → Konto)."
     }
   },
   "options": {
@@ -123,12 +112,12 @@
   },
   "issues": {
     "bankid_expired": {
-      "title": "VafabMiljö: logga in med BankID igen",
-      "description": "BankID-inloggningen för **{address}** har gått ut, så fakturor och avgifter uppdateras inte längre (tömningsdatum gör det fortfarande). Öppna VafabMiljö-panelen (Läs mer), gå till **Inställningar → Konto** och klicka **Logga in igen**."
+      "title": "VafabMiljö: logga in på Mina sidor igen",
+      "description": "Inloggningen till VafabMiljö Mina sidor för **{address}** har gått ut eller är inte gjord än, så fakturor, avgifter och fastighet uppdateras inte (tömningsdatum gör det fortfarande). Öppna VafabMiljö-panelen (Läs mer), gå till **Inställningar → Konto** och klicka **Logga in igen**."
     },
-    "no_customer": {
-      "title": "VafabMiljö: inget kundkonto för den här BankID-inloggningen",
-      "description": "VafabMiljö svarar att personen som loggade in med BankID för **{address}** saknar kunddata, så fakturor, avgifter och beställningar kan inte hämtas (tömningsdatum fungerar fortfarande). Logga in med den person som abonnemanget står på. Om det redan är så och VafabMiljö-appen inte heller visar några fakturor, kontakta VafabMiljös kundtjänst - då saknas kontot hos dem. Meddelandet försvinner av sig självt när VafabMiljö skickar kunddatan igen."
+    "login_expiring": {
+      "title": "VafabMiljö: inloggningen går snart ut",
+      "description": "Inloggningen till VafabMiljö Mina sidor för **{address}** går ut **{expires}** (den gäller 7 dagar och kan inte förlängas). Logga in igen med BankID innan dess från VafabMiljö-panelen (Läs mer) → **Inställningar → Konto** → **Logga in igen**, så fortsätter fakturorna att uppdateras. Händelsen `vafabmiljo_login_expiring` skickas också, för en påminnelse i mobilen."
     }
   }
 }

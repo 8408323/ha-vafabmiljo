@@ -8,10 +8,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
 from .api import VafabMiljoClient
-from .const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE, DOMAIN
-from .coordinator import VafabMiljoCoordinator, bankid_issue_id
+from .const import (
+    CONF_DEVICE_BEARER,
+    CONF_DEVICE_UUID,
+    CONF_MS_ACCESS,
+    CONF_MS_REFRESH,
+    CONF_MS_REFRESH_EXPIRES,
+    DOMAIN,
+)
+from .coordinator import VafabMiljoCoordinator, bankid_issue_id, expiring_issue_id, no_customer_issue_id
 from .invoices import VafabMiljoInvoiceNotifier, async_remove_invoice_store
 from .login import async_cancel_login
+from .minasidor import MinaSidorClient
 from .panel import async_register_panel, async_unregister_panel
 from .reminders import VafabMiljoNotifier, async_setup_websocket, store_for
 from .services import async_setup_services
@@ -22,13 +30,19 @@ PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.CALENDAR, Platform
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_create_session(hass)
-    client = VafabMiljoClient(
-        session,
-        entry.data[CONF_DEVICE_UUID],
-        entry.data[CONF_DEVICE_BEARER],
-        entry.data.get(CONF_SESSION_COOKIE),
-    )
-    coordinator = VafabMiljoCoordinator(hass, entry, client)
+    # the app API without any login: pickup schedule and notification settings
+    client = VafabMiljoClient(session, entry.data[CONF_DEVICE_UUID], entry.data[CONF_DEVICE_BEARER])
+    minasidor = None
+    if entry.data.get(CONF_MS_REFRESH):
+        minasidor = MinaSidorClient(
+            session,
+            entry.data[CONF_MS_REFRESH],
+            float(entry.data.get(CONF_MS_REFRESH_EXPIRES) or 0),
+            entry.data.get(CONF_MS_ACCESS),
+        )
+    # 0.5.3 raised this when the app API had no customer data; account data comes from Mina sidor now
+    ir.async_delete_issue(hass, DOMAIN, no_customer_issue_id(entry.entry_id))
+    coordinator = VafabMiljoCoordinator(hass, entry, client, minasidor)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     # Before the notifier: its first check can fire an invoice event straight
@@ -38,9 +52,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_register_panel(hass, entry.entry_id)
     async_setup_websocket(hass)
     entry.async_on_unload(lambda: async_cancel_login(hass, entry.entry_id))
-    if client.session_cookie:
-        # between the (by default 30-minute) refreshes, so the BankID session doesn't time out
-        entry.async_on_unload(coordinator.async_start_keep_alive())
     # Per-recipient notifications configured in the panel (reminders.py).
     coordinator.reminders = VafabMiljoNotifier(hass, entry, coordinator)
     entry.async_on_unload(coordinator.reminders.async_unload)
@@ -76,11 +87,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # The scan-interval option only takes effect on the coordinator at
     # construction time, so a change needs a full reload to apply. So does a
-    # new session cookie from a login or reauth - but not the coordinator
-    # saving a cookie the backend rotated on the session it already uses.
-    coordinator = getattr(entry, "runtime_data", None)
-    if isinstance(coordinator, VafabMiljoCoordinator) and coordinator.is_own_entry_update(entry):
-        return
+    # new Mina sidor login saved by the panel.
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -90,6 +97,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_unregister_panel(hass, entry.entry_id)
         # nothing polls a disabled entry, so its repair would never clear; setup recreates it if still expired
         ir.async_delete_issue(hass, DOMAIN, bankid_issue_id(entry.entry_id))
+        ir.async_delete_issue(hass, DOMAIN, expiring_issue_id(entry.entry_id))
     return unloaded
 
 
@@ -98,3 +106,4 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await async_remove_invoice_store(hass, entry)
     await store_for(hass, entry).async_remove()
     ir.async_delete_issue(hass, DOMAIN, bankid_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, expiring_issue_id(entry.entry_id))

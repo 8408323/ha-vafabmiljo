@@ -9,19 +9,13 @@
         }
       },
       "address": {
-        "description": "Choose your address from the matches.",
+        "description": "Choose your address from the matches. Invoices, fees and the property come later: log in to Mina sidor with BankID in the VafabMiljö panel (Settings → Account).",
         "data": {
           "plant_id": "Address"
         }
       },
-      "bankid_start": {
-        "description": "Optional: also connect your VafabMiljö account to get invoices and contract fees. You can skip this and do it later from the VafabMiljö panel in the sidebar (Settings → Log in with BankID).",
-        "data": {
-          "enable_bankid": "Connect with BankID"
-        }
-      },
       "reauth_confirm": {
-        "description": "Your VafabMiljö BankID session expired. Sign in again to keep invoices and contract data updating. The next step shows a QR code and a link that opens BankID on this device."
+        "description": "Your login to VafabMiljö Mina sidor has run out (it lasts 7 days). Open the **VafabMiljö** panel in the sidebar, go to **Settings → Account** and click **Log in again** - the QR code and the BankID link there stay up to date. Submit to close this dialog."
       },
       "reconfigure": {
         "description": "Search for the new address to bind this entry to.",
@@ -36,19 +30,14 @@
         }
       }
     },
-    "progress": {
-      "waiting_for_bankid": "### [Open BankID on this device]({autostart_url})\n\n**On this phone or tablet:** tap the link, approve in the BankID app, then switch back to Home Assistant. The login continues by itself.\n\n**On another device:** open the BankID app and scan this QR code:\n\n{qr_code}",
-      "waiting_for_bankid_qr": "Open the BankID app and scan this QR code:\n\n{qr_code}"
-    },
     "error": {
       "cannot_connect": "Failed to reach VafabMiljö. Please try again.",
-      "no_matches": "No address matched that search.",
-      "qr_expired": "The BankID login expired before it was approved. Submit again to start a new one."
+      "no_matches": "No address matched that search."
     },
     "abort": {
       "already_configured": "This address is already set up in Home Assistant.",
-      "reauth_successful": "Logged in again with BankID. Invoices and fees will update shortly.",
-      "reconfigure_successful": "The address has been changed."
+      "reconfigure_successful": "The address has been changed.",
+      "reauth_use_panel": "Log in again from the VafabMiljö panel (Settings → Account)."
     }
   },
   "options": {
@@ -123,12 +112,12 @@
   },
   "issues": {
     "bankid_expired": {
-      "title": "VafabMiljö: log in with BankID again",
-      "description": "The BankID login for **{address}** has expired, so invoices and fees are no longer updated (pickup dates still are). Open the VafabMiljö panel (Learn more), go to **Settings → Account** and click **Log in again**."
+      "title": "VafabMiljö: log in to Mina sidor again",
+      "description": "The login to VafabMiljö Mina sidor for **{address}** has run out or isn't done yet, so invoices, fees and the property aren't updated (pickup dates still are). Open the VafabMiljö panel (Learn more), go to **Settings → Account** and click **Log in again**."
     },
-    "no_customer": {
-      "title": "VafabMiljö: no customer account for this BankID login",
-      "description": "VafabMiljö answers that the person who logged in with BankID for **{address}** has no customer data, so invoices, fees and orders can't be fetched (pickup dates still work). Log in with the person the subscription is registered to. If that's already the case and the VafabMiljö app shows no invoices either, contact VafabMiljö customer service - the account is then missing on their side. This message goes away by itself once VafabMiljö returns the customer data again."
+    "login_expiring": {
+      "title": "VafabMiljö: the login runs out soon",
+      "description": "The login to VafabMiljö Mina sidor for **{address}** runs out on **{expires}** (it lasts 7 days and can't be extended). Log in again with BankID before then from the VafabMiljö panel (Learn more) → **Settings → Account** → **Log in again**, so invoices keep updating. The event `vafabmiljo_login_expiring` is fired as well, for a reminder on your phone."
     }
   }
 }

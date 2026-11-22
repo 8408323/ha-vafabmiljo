@@ -14,15 +14,12 @@ from unittest.mock import AsyncMock
 import pytest
 from homeassistant.config_entries import ConfigEntry, FlowResultType
 from homeassistant.core import HomeAssistant
-from vafabmiljo import config_flow as config_flow_module
-from vafabmiljo.api import VafabMiljoAuthError, VafabMiljoError
+from vafabmiljo.api import VafabMiljoError
 from vafabmiljo.config_flow import (
     VafabMiljoConfigFlow,
     VafabMiljoOptionsFlow,
-    _qr_markdown,
     bankid_autostart_desktop_url,
     bankid_autostart_url,
-    is_authenticated,
 )
 
 
@@ -57,16 +54,6 @@ def mock_client(monkeypatch):
     return client
 
 
-@pytest.fixture(autouse=True)
-def _no_real_bankid_poll_delay(monkeypatch):
-    # _poll_bankid_after_delay() sleeps BANKID_POLL_INTERVAL (2s) before every
-    # poll in production; tests just need the background task to resolve fast.
-    async def _instant_sleep(seconds):
-        return None
-
-    monkeypatch.setattr(config_flow_module.asyncio, "sleep", _instant_sleep)
-
-
 async def test_user_step_no_matches_shows_error(hass, mock_client):
     mock_client.search_addresses.return_value = []
     flow = _make_flow(hass)
@@ -95,203 +82,9 @@ async def test_user_step_match_moves_to_address_select(hass, mock_client):
     assert flow._matches[0]["plant_id"] == "p1"
 
 
-async def test_address_step_selects_and_moves_to_bankid_start(hass, mock_client):
-    flow = _make_flow(hass)
-    flow._matches = [{"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}]
-
-    result = await flow.async_step_address({"plant_id": "p1"})
-
-    assert flow._selected["address"] == "Testgatan 1"
-    assert result["step_id"] == "bankid_start"
-    # Keyed on the address (plant_id), not device_uuid, so two entries for the
-    # same address collide but different addresses are free to coexist.
-    assert flow._unique_id == "p1"
-
-
-async def test_bankid_start_skip_creates_entry_directly(hass, mock_client):
-    flow = _make_flow(hass, mock_client)
-    flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
-    flow._device_uuid = "dev1"
-    flow._device_bearer = "bearer1"
-
-    result = await flow.async_step_bankid_start({"enable_bankid": False})
-
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"]["address"] == "Testgatan 1"
-    mock_client.set_address.assert_awaited_once_with("p1")
-    mock_client.start_bankid_auth.assert_not_called()
-
-
-async def test_bankid_start_enabled_moves_to_wait(hass, mock_client):
-    mock_client.start_bankid_auth.return_value = {"qr": "<svg>first</svg>"}
-    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
-    flow = _make_flow(hass, mock_client)
-    flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
-
-    # First entry shows the QR from start_bankid_auth() and schedules the
-    # single background poll-loop task (progress_task) - it hasn't run yet.
-    result = await flow.async_step_bankid_start({"enable_bankid": True})
-    assert result["type"] == FlowResultType.SHOW_PROGRESS
-    assert result["step_id"] == "bankid_wait"
-    qr_markdown = result["description_placeholders"]["qr_code"]
-    encoded = qr_markdown.split("base64,", 1)[1].rstrip(")")
-    assert "first" in base64.b64decode(encoded).decode()
-    mock_client.poll_bankid_status.assert_not_called()
-
-    # Once the task completes (authenticated), HA re-invokes this step and the
-    # flow finishes - a single task is used throughout, not one per poll
-    # round, since HA can re-enter a progress step before a task is done and
-    # creating a fresh task each round trips core issue #95749.
-    await _settle(flow._bankid_task)
-    result2 = await flow.async_step_bankid_wait()
-    assert result2 == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "finish"}
-
-
-async def test_bankid_wait_links_to_bankid_on_this_device(hass, mock_client):
-    # The autostart token from start_bankid_auth() goes into BankID's universal link, so a phone
-    # running the HA app can open BankID itself instead of scanning its own screen.
-    mock_client.start_bankid_auth.return_value = {"qr": "<svg>first</svg>", "token": "auto-123"}
-    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
-    flow = _make_flow(hass, mock_client)
-    flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
-
-    result = await flow.async_step_bankid_start({"enable_bankid": True})
-
-    assert result["type"] == FlowResultType.SHOW_PROGRESS
-    assert result["progress_action"] == "waiting_for_bankid"
-    placeholders = result["description_placeholders"]
-    assert placeholders["autostart_url"] == "https://app.bankid.com/?autostarttoken=auto-123&redirect=null"
-    assert placeholders["qr_code"].startswith("![BankID QR code](data:image/svg+xml;base64,")
-
-    # the poll keeps running while the user is in the BankID app and finishes the flow
-    await _settle(flow._bankid_task)
-    assert await flow.async_step_bankid_wait() == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "finish"}
-
-
-async def test_bankid_wait_without_token_shows_only_the_qr(hass, mock_client):
-    mock_client.start_bankid_auth.return_value = {"qr": "<svg/>", "token": None}
-    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
-    flow = _make_flow(hass, mock_client)
-    flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
-
-    result = await flow.async_step_bankid_start({"enable_bankid": True})
-
-    assert result["progress_action"] == "waiting_for_bankid_qr"
-    assert "autostart_url" not in result["description_placeholders"]
-    await _settle(flow._bankid_task)
-
-
-async def test_reauth_links_to_bankid_on_this_device(hass, mock_client):
-    mock_client.start_bankid_auth.return_value = {"qr": "<svg/>", "token": "re-tok"}
-    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
-    flow = _make_flow(hass)
-    flow._reauth_entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
-
-    result = await flow.async_step_reauth_confirm({})
-
-    assert result["step_id"] == "reauth_bankid_wait"
-    assert result["progress_action"] == "waiting_for_bankid"
-    assert result["description_placeholders"]["autostart_url"] == (
-        "https://app.bankid.com/?autostarttoken=re-tok&redirect=null"
-    )
-    await _settle(flow._bankid_task)
-    assert await flow.async_step_reauth_bankid_wait() == {
-        "type": FlowResultType.SHOW_PROGRESS_DONE,
-        "next_step_id": "reauth_finish",
-    }
-
-
 def test_autostart_urls_escape_the_token():
     assert bankid_autostart_url("a b&c") == "https://app.bankid.com/?autostarttoken=a%20b%26c&redirect=null"
     assert bankid_autostart_desktop_url("a/b") == "bankid:///?autostarttoken=a%2Fb&redirect=null"
-
-
-async def test_bankid_wait_reenters_before_task_done_shows_same_task(hass, mock_client):
-    # HA's flow manager can re-invoke a progress step before its task is done
-    # (e.g. a frontend reload) - this must keep showing progress with the
-    # *same* task, not read its (not yet available) result.
-    gate = asyncio.Event()
-
-    async def _blocked_poll():
-        await gate.wait()
-        return {"status": "authenticated successfully", "qr": "", "hint": ""}
-
-    mock_client.poll_bankid_status.side_effect = _blocked_poll
-
-    flow = _make_flow(hass, mock_client)
-    first = await flow.async_step_bankid_wait()
-    assert first["type"] == FlowResultType.SHOW_PROGRESS
-    task = flow._bankid_task
-    await asyncio.sleep(0)  # let the task start and block on gate.wait()
-
-    result = await flow.async_step_bankid_wait()
-
-    assert result["type"] == FlowResultType.SHOW_PROGRESS
-    assert flow._bankid_task is task
-
-    gate.set()
-    await _settle(task)
-
-
-async def test_bankid_wait_completes_when_authenticated(hass, mock_client):
-    mock_client.poll_bankid_status.return_value = {"status": "authenticated successfully", "qr": "", "hint": ""}
-    flow = _make_flow(hass, mock_client)
-
-    first = await flow.async_step_bankid_wait()
-    assert first["type"] == FlowResultType.SHOW_PROGRESS
-    await _settle(flow._bankid_task)
-
-    result = await flow.async_step_bankid_wait()
-
-    assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "finish"}
-
-
-async def test_finish_creates_entry_with_all_data(hass, mock_client):
-    mock_client.session_cookie = "cookie123"
-    flow = _make_flow(hass, mock_client)
-    flow._device_uuid = "dev1"
-    flow._device_bearer = "bearer1"
-    flow._selected = {"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}
-
-    result = await flow.async_step_finish()
-
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Testgatan 1, Teststad"
-    assert result["data"]["session_cookie"] == "cookie123"
-    assert result["data"]["device_uuid"] == "dev1"
-
-
-async def test_reauth_flow_updates_session_cookie(hass, mock_client):
-    mock_client.start_bankid_auth.return_value = {"qr": "<svg/>"}
-    mock_client.poll_bankid_status.side_effect = [
-        {
-            "status": {"message": {"hintCode": "outstandingTransaction"}},
-            "qr": "<svg>pending</svg>",
-            "hint": "outstandingTransaction",
-        },
-        {"status": "authenticated successfully", "qr": "", "hint": ""},
-    ]
-    mock_client.session_cookie = "new-cookie"
-
-    flow = _make_flow(hass)
-    entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1", "session_cookie": "old-cookie"})
-    flow._reauth_entry = entry
-
-    # First entry into reauth_confirm starts BankID and schedules the single
-    # poll-loop task, which polls twice (pending, then authenticated) inside
-    # itself before completing.
-    confirm_result = await flow.async_step_reauth_confirm({})
-    assert confirm_result["type"] == FlowResultType.SHOW_PROGRESS
-    assert flow._client is mock_client
-
-    await _settle(flow._bankid_task)
-    wait_result = await flow.async_step_reauth_bankid_wait()
-    assert wait_result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "reauth_finish"}
-
-    finish_result = await flow.async_step_reauth_finish()
-    assert finish_result["type"] == FlowResultType.ABORT
-    assert finish_result["reason"] == "reauth_successful"
-    assert entry.data["session_cookie"] == "new-cookie"
 
 
 async def test_user_step_register_failure_shows_cannot_connect(hass, mock_client):
@@ -304,63 +97,6 @@ async def test_user_step_register_failure_shows_cannot_connect(hass, mock_client
     assert result["errors"] == {"base": "cannot_connect"}
 
 
-async def test_bankid_wait_error_falls_back_to_failed_step(hass, mock_client):
-    mock_client.poll_bankid_status.side_effect = VafabMiljoError("boom")
-    flow = _make_flow(hass, mock_client)
-
-    first = await flow.async_step_bankid_wait()
-    assert first["type"] == FlowResultType.SHOW_PROGRESS
-    await _settle(flow._bankid_task)
-
-    result = await flow.async_step_bankid_wait()
-    assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "bankid_failed"}
-
-    failed_result = await flow.async_step_bankid_failed()
-    assert failed_result["type"] == FlowResultType.FORM
-    assert failed_result["step_id"] == "bankid_start"
-    assert failed_result["errors"] == {"base": "cannot_connect"}
-
-
-async def test_bankid_qr_expiry_detected_without_waiting_for_full_timeout(hass, mock_client):
-    # BankID's own terminal failure (unscanned QR expiry, ~25-30s in reality)
-    # must be caught immediately - not just eventually via BANKID_POLL_TIMEOUT.
-    mock_client.poll_bankid_status.return_value = {
-        "status": {"code": "BANKID_MSG", "message": {"status": "failed", "hintCode": "startFailed"}},
-        "qr": "",
-        "hint": "startFailed",
-    }
-    flow = _make_flow(hass, mock_client)
-
-    first = await flow.async_step_bankid_wait()
-    assert first["type"] == FlowResultType.SHOW_PROGRESS
-    await _settle(flow._bankid_task)
-
-    result = await flow.async_step_bankid_wait()
-    assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "bankid_failed"}
-
-    failed_result = await flow.async_step_bankid_failed()
-    assert failed_result["errors"] == {"base": "qr_expired"}
-
-
-async def test_bankid_wait_gives_up_after_poll_timeout(hass, mock_client, monkeypatch):
-    # Never-authenticated pending status forever - the loop must eventually
-    # give up rather than poll indefinitely.
-    monkeypatch.setattr(config_flow_module, "BANKID_POLL_TIMEOUT", -1)
-    mock_client.poll_bankid_status.return_value = {
-        "status": {"message": {"hintCode": "outstandingTransaction"}},
-        "qr": "<svg>pending</svg>",
-        "hint": "outstandingTransaction",
-    }
-    flow = _make_flow(hass, mock_client)
-
-    first = await flow.async_step_bankid_wait()
-    assert first["type"] == FlowResultType.SHOW_PROGRESS
-    await _settle(flow._bankid_task)
-
-    result = await flow.async_step_bankid_wait()
-    assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "bankid_failed"}
-
-
 async def test_reauth_entry_point_delegates_to_confirm(hass, mock_client):
     flow = _make_flow(hass, mock_client)
     entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
@@ -370,38 +106,6 @@ async def test_reauth_entry_point_delegates_to_confirm(hass, mock_client):
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "reauth_confirm"
-
-
-async def test_reauth_bankid_wait_auth_error_reprompts(hass, mock_client):
-    mock_client.poll_bankid_status.side_effect = VafabMiljoAuthError("still rejected")
-    flow = _make_flow(hass, mock_client)
-
-    first = await flow.async_step_reauth_bankid_wait()
-    assert first["type"] == FlowResultType.SHOW_PROGRESS
-    await _settle(flow._bankid_task)
-
-    result = await flow.async_step_reauth_bankid_wait()
-
-    assert result == {"type": FlowResultType.SHOW_PROGRESS_DONE, "next_step_id": "reauth_confirm"}
-
-
-async def test_reauth_bankid_qr_expiry_shows_error_on_reconfirm(hass, mock_client):
-    mock_client.poll_bankid_status.return_value = {
-        "status": {"code": "BANKID_MSG", "message": {"status": "failed", "hintCode": "startFailed"}},
-        "qr": "",
-        "hint": "startFailed",
-    }
-    flow = _make_flow(hass, mock_client)
-    flow._reauth_entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
-
-    first = await flow.async_step_reauth_bankid_wait()
-    assert first["type"] == FlowResultType.SHOW_PROGRESS
-    await _settle(flow._bankid_task)
-    await flow.async_step_reauth_bankid_wait()
-
-    result = await flow.async_step_reauth_confirm()
-
-    assert result["errors"] == {"base": "qr_expired"}
 
 
 async def test_reconfigure_no_matches_shows_error(hass, mock_client):
@@ -492,39 +196,42 @@ async def test_options_flow_saves_scan_interval():
     assert result["data"] == {"scan_interval": 15}
 
 
-def test_is_authenticated_handles_both_shapes():
-    assert is_authenticated({"status": "authenticated successfully"}) is True
-    assert is_authenticated({"status": {"code": "BANKID_MSG"}}) is False
-
-
-def test_qr_markdown_produces_data_uri():
-    markdown = _qr_markdown("<svg>x</svg>")
-    assert markdown.startswith("![BankID QR code](data:image/svg+xml;base64,")
-
-
 def _decode_qr_markdown(markdown: str) -> str:
     encoded = markdown.split("base64,", 1)[1].rstrip(")")
     return base64.b64decode(encoded).decode()
 
 
-def test_qr_markdown_adds_white_background_rect():
-    # BankID's real SVG draws only black modules with no background, which
-    # renders illegibly transparent against HA's own (often dark) theme.
-    decoded = _decode_qr_markdown(_qr_markdown('<svg xmlns="http://www.w3.org/2000/svg">x</svg>'))
-    assert '<rect width="100%" height="100%" fill="#ffffff"/>' in decoded
+async def test_address_step_creates_the_entry_without_a_login(hass, mock_client):
+    flow = _make_flow(hass, mock_client)
+    flow._device_uuid = "dev1"
+    flow._device_bearer = "bearer1"
+    flow._matches = [{"address": "Testgatan 1", "city": "Teststad", "plant_id": "p1"}]
+
+    result = await flow.async_step_address({"plant_id": "p1"})
+
+    # Keyed on the address (plant_id), not device_uuid, so two entries for the
+    # same address collide but different addresses are free to coexist.
+    assert flow._unique_id == "p1"
+    mock_client.set_address.assert_awaited_once_with("p1")
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Testgatan 1, Teststad"
+    assert result["data"] == {
+        "device_uuid": "dev1",
+        "device_bearer": "bearer1",
+        "address": "Testgatan 1",
+        "city": "Teststad",
+        "plant_id": "p1",
+    }
 
 
-def test_qr_markdown_rect_matches_negative_viewbox():
-    # BankID's real SVG uses a viewBox with a negative origin (e.g. "-4 -4 49
-    # 49") - a plain 0,0/100%/100% rect leaves the top-left quiet zone
-    # uncovered while overshooting the bottom-right, so the rect must match
-    # the viewBox's own x/y/width/height exactly.
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 49 49">x</svg>'
-    decoded = _decode_qr_markdown(_qr_markdown(svg))
-    assert '<rect x="-4" y="-4" width="49" height="49" fill="#ffffff"/>' in decoded
+async def test_reauth_points_to_the_panel(hass, mock_client):
+    flow = _make_flow(hass, mock_client)
+    flow._reauth_entry = ConfigEntry(data={"device_uuid": "dev1", "device_bearer": "bearer1"})
 
+    result = await flow.async_step_reauth({})
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
 
-def test_qr_markdown_does_not_double_add_rect_if_already_present():
-    svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="white"/>x</svg>'
-    decoded = _decode_qr_markdown(_qr_markdown(svg))
-    assert decoded == svg
+    result = await flow.async_step_reauth_confirm({})
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_use_panel"

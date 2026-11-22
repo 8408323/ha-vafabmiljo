@@ -54,11 +54,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
         # entity back to its config entry, and works the same for the common
         # single-account case.
         for entry in hass.config_entries.async_entries(DOMAIN):
-            coordinator = entry.runtime_data
-            if coordinator is None:
+            coordinator = getattr(entry, "runtime_data", None)
+            if coordinator is None or coordinator.minasidor is None:
                 continue
             try:
-                pdf_bytes = await coordinator.client.download_invoice(invoice_id)
+                pdf_bytes = await coordinator.minasidor.download_invoice(invoice_id)
             except VafabMiljoError:
                 continue
             filename = f"{secrets.token_urlsafe(16)}.pdf"

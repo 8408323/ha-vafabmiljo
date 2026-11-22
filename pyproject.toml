@@ -1,6 +1,6 @@
 [project]
 name = "ha-vafabmiljo"
-version = "0.5.3"
+version = "0.6.0"
 requires-python = ">=3.13"
 dependencies = []
 
@@ -19,6 +19,7 @@ dev = [
     # stream_writer that aiohttp >= 3.10 requires; tests/test_api.py patches that in.
     "aiohttp>=3.14.5",
     "aioresponses>=0.7.9",
+    "segno>=1.6.6",
 ]
 
 [tool.ruff]

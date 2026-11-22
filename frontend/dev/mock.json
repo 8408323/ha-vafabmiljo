@@ -77,6 +77,12 @@
    "device_id": "dev1",
    "platform": "vafabmiljo",
    "translation_key": "invoice_reminder_time"
+  },
+  "binary_sensor.exempelgatan_1_exempelstad_bankid_connected": {
+   "entity_id": "binary_sensor.exempelgatan_1_exempelstad_bankid_connected",
+   "device_id": "dev1",
+   "platform": "vafabmiljo",
+   "translation_key": "bankid_connected"
   }
  },
  "states": {
@@ -183,7 +189,10 @@
    "entity_id": "sensor.exempelgatan_1_exempelstad_property",
    "state": "EXEMPEL 1:23",
    "attributes": {
-    "friendly_name": "Exempelgatan 1, Exempelstad Property"
+    "friendly_name": "Exempelgatan 1, Exempelstad Property",
+    "autogiro": true,
+    "payment_type": "AGBG",
+    "zip": "12345"
    }
   },
   "calendar.exempelgatan_1_exempelstad_pickups": {
@@ -227,6 +236,15 @@
    "state": "18:00:00",
    "attributes": {
     "friendly_name": "Exempelgatan 1, Exempelstad Invoice reminder time"
+   }
+  },
+  "binary_sensor.exempelgatan_1_exempelstad_bankid_connected": {
+   "entity_id": "binary_sensor.exempelgatan_1_exempelstad_bankid_connected",
+   "state": "on",
+   "attributes": {
+    "friendly_name": "Exempelgatan 1, Exempelstad BankID connected",
+    "device_class": "connectivity",
+    "login_expires": "LOGIN_EXPIRES"
    }
   }
  },

@@ -45,7 +45,7 @@ async def test_setup_entry_creates_coordinator_and_forwards_platforms(monkeypatc
     # anonymous entry: no BankID, no invoices, no notifier
     assert entry.runtime_data.invoice_notifier is None
     hass.config_entries.async_forward_entry_setups.assert_awaited_once()
-    assert len(entry._unload_callbacks) == 4  # panel login + keep-alive + reminders + update listener
+    assert len(entry._unload_callbacks) == 3  # panel login + reminders + update listener
     entry._unload_callbacks[0]()  # cancelling a login when none runs is a no-op
 
 
@@ -64,9 +64,9 @@ async def test_setup_entry_creates_notifier_for_authenticated_entry(monkeypatch)
     notifier = entry.runtime_data.invoice_notifier
     assert notifier is not None
     # unload is wired through the entry's own hooks (update listener + notifier)
-    # panel login + keep-alive + reminders + invoice notifier + update listener
-    assert len(entry._unload_callbacks) == 5
-    assert entry._unload_callbacks[3] == notifier.async_unload
+    # panel login + reminders + invoice notifier + update listener
+    assert len(entry._unload_callbacks) == 4
+    assert entry._unload_callbacks[2] == notifier.async_unload
 
 
 async def test_reload_entry_calls_hass_reload():
@@ -83,7 +83,10 @@ async def test_unload_entry_delegates_to_hass():
     hass.config_entries.async_unload_platforms.return_value = True
     entry = _entry()
 
-    hass.data["_issues"] = {("vafabmiljo", "bankid_expired_test_entry"): {}}
+    hass.data["_issues"] = {
+        ("vafabmiljo", "bankid_expired_test_entry"): {},
+        ("vafabmiljo", "login_expiring_test_entry"): {},
+    }
     result = await async_unload_entry(hass, entry)
 
     assert result is True
@@ -155,7 +158,10 @@ async def test_remove_entry_deletes_the_invoice_store():
     hass.data["_stores"] = {"vafabmiljo.test_entry.invoices": {"announced": [1]}}
     entry = _entry()
 
-    hass.data["_issues"] = {("vafabmiljo", "bankid_expired_test_entry"): {}}
+    hass.data["_issues"] = {
+        ("vafabmiljo", "bankid_expired_test_entry"): {},
+        ("vafabmiljo", "login_expiring_test_entry"): {},
+    }
     await async_remove_entry(hass, entry)
     assert hass.data["_issues"] == {}  # the repair goes with the entry
 
@@ -189,9 +195,8 @@ async def test_download_service_is_registered_before_the_notifier_can_fire(monke
 
 
 async def test_setup_uses_a_session_without_cookie_jar(monkeypatch):
-    """HA's shared session has one cookie jar for everyone, and a jar cookie overrides the
-    vafab_session header the client sends - another entry or login could replace this entry's
-    BankID session. The entry gets its own session that keeps no cookies at all."""
+    """HA's shared session has one cookie jar for everyone. The entry gets its own session that keeps
+    no cookies at all - the Mina sidor refresh cookie is sent by hand."""
     from aiohttp import DummyCookieJar
     from vafabmiljo.coordinator import VafabMiljoData
 
@@ -206,65 +211,6 @@ async def test_setup_uses_a_session_without_cookie_jar(monkeypatch):
     assert isinstance(kwargs["cookie_jar"], DummyCookieJar)
 
 
-async def test_setup_keeps_the_bankid_session_alive_between_refreshes(monkeypatch):
-    from vafabmiljo.const import KEEP_ALIVE_INTERVAL_SECONDS
-    from vafabmiljo.coordinator import VafabMiljoData
-
-    async def _refresh(self):
-        self.data = VafabMiljoData(pickups=[], authenticated=True)
-
-    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
-    hass = _hass()
-    entry = _entry()
-    await async_setup_entry(hass, entry)
-
-    ((action, interval),) = hass.interval_listeners
-    assert interval.total_seconds() == KEEP_ALIVE_INTERVAL_SECONDS
-    assert interval.total_seconds() < entry.runtime_data.update_interval.total_seconds()
-    entry._unload_callbacks[1]()  # unloading stops it
-    assert hass.interval_listeners == []
-
-
-async def test_setup_without_bankid_has_no_keep_alive(monkeypatch):
-    from vafabmiljo.coordinator import VafabMiljoData
-
-    async def _refresh(self):
-        self.data = VafabMiljoData(pickups=[], authenticated=False)
-
-    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
-    hass = _hass()
-    entry = ConfigEntry(data={CONF_DEVICE_UUID: "dev1", CONF_DEVICE_BEARER: "bearer1"})
-    await async_setup_entry(hass, entry)
-
-    assert hass.interval_listeners == []
-
-
-async def test_saving_a_rotated_cookie_does_not_reload():
-    hass = _hass()
-    entry = _entry()
-    coordinator = VafabMiljoCoordinator(hass, entry, AsyncMock())
-    entry.runtime_data = coordinator
-    coordinator.client.session_cookie = "cookie2"
-    hass.config_entries.async_update_entry = lambda e, *, data: setattr(e, "data", data)
-
-    coordinator._persist_session_cookie()
-    await _async_reload_entry(hass, entry)
-
-    assert entry.data[CONF_SESSION_COOKIE] == "cookie2"
-    hass.config_entries.async_reload.assert_not_awaited()
-
-
-async def test_a_new_login_cookie_still_reloads():
-    hass = _hass()
-    entry = _entry()
-    entry.runtime_data = VafabMiljoCoordinator(hass, entry, AsyncMock())
-    entry.data = {**entry.data, CONF_SESSION_COOKIE: "from-a-login"}
-
-    await _async_reload_entry(hass, entry)
-
-    hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
-
-
 async def test_an_options_change_still_reloads():
     hass = _hass()
     entry = _entry()
@@ -274,3 +220,59 @@ async def test_an_options_change_still_reloads():
     await _async_reload_entry(hass, entry)
 
     hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def _setup(monkeypatch, data):
+    from vafabmiljo.coordinator import VafabMiljoData
+
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=False)
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
+    hass = _hass()
+    hass.data["_issues"] = {("vafabmiljo", "no_customer_test_entry"): {}}
+    entry = ConfigEntry(data=data)
+    await async_setup_entry(hass, entry)
+    return hass, entry
+
+
+async def test_setup_without_a_mina_sidor_login(monkeypatch):
+    hass, entry = await _setup(monkeypatch, {CONF_DEVICE_UUID: "dev1", CONF_DEVICE_BEARER: "bearer1"})
+
+    assert entry.runtime_data.minasidor is None
+    assert entry.runtime_data.client.session_cookie is None  # the app API is used without login
+    assert ("vafabmiljo", "no_customer_test_entry") not in hass.data["_issues"]  # 0.5.3's repair is gone
+
+
+async def test_setup_with_a_mina_sidor_login(monkeypatch):
+    from vafabmiljo.const import CONF_MS_ACCESS, CONF_MS_REFRESH, CONF_MS_REFRESH_EXPIRES
+    from vafabmiljo.minasidor import MinaSidorClient
+
+    _hass_, entry = await _setup(
+        monkeypatch,
+        {
+            CONF_DEVICE_UUID: "dev1",
+            CONF_DEVICE_BEARER: "bearer1",
+            CONF_MS_REFRESH: "refresh1",
+            CONF_MS_REFRESH_EXPIRES: "1800000000",
+            CONF_MS_ACCESS: "access1",
+        },
+    )
+
+    ms = entry.runtime_data.minasidor
+    assert isinstance(ms, MinaSidorClient)
+    assert ms.refresh_cookie == "refresh1"
+    assert ms.refresh_expires == 1800000000.0
+    assert ms.access_token == "access1"
+
+
+async def test_setup_with_a_mina_sidor_login_without_expiry_or_token(monkeypatch):
+    from vafabmiljo.const import CONF_MS_REFRESH
+
+    _hass_, entry = await _setup(
+        monkeypatch, {CONF_DEVICE_UUID: "dev1", CONF_DEVICE_BEARER: "bearer1", CONF_MS_REFRESH: "refresh1"}
+    )
+
+    ms = entry.runtime_data.minasidor
+    assert ms.refresh_expires == 0.0
+    assert ms.access_token is None

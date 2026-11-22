@@ -227,13 +227,21 @@ def test_property_sensor_reports_designation_and_attributes():
                     "zip": "72596",
                     "services": ["RH"],
                     "environment": "default",
+                    "autogiro": True,
+                    "payment_type": "AGBG",
                 }
             },
         )
     )
     sensor = VafabMiljoPropertySensor(coordinator, _entry())
     assert sensor.native_value == "Testgatan 2:7"
-    assert sensor.extra_state_attributes == {"zip": "72596", "services": ["RH"], "environment": "default"}
+    assert sensor.extra_state_attributes == {
+        "zip": "72596",
+        "services": ["RH"],
+        "environment": "default",
+        "autogiro": True,
+        "payment_type": "AGBG",
+    }
 
 
 def test_property_sensor_handles_missing_properties():

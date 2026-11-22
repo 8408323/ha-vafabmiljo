@@ -14,12 +14,22 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_ADDRESS, CONF_CITY, CONF_DEVICE_BEARER, CONF_PLANT_ID, CONF_SESSION_COOKIE
+from .const import (
+    CONF_ADDRESS,
+    CONF_CITY,
+    CONF_DEVICE_BEARER,
+    CONF_MS_ACCESS,
+    CONF_MS_REFRESH,
+    CONF_PLANT_ID,
+    CONF_SESSION_COOKIE,
+)
 from .coordinator import VafabMiljoCoordinator
 
 TO_REDACT = {
     CONF_DEVICE_BEARER,
     CONF_SESSION_COOKIE,
+    CONF_MS_REFRESH,
+    CONF_MS_ACCESS,
     CONF_ADDRESS,
     CONF_CITY,
     CONF_PLANT_ID,
@@ -34,7 +44,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     return {
         "entry_data": async_redact_data(dict(entry.data), TO_REDACT),
         "authenticated": data.authenticated,
-        "no_customer": data.no_customer,
+        "session_expired": data.session_expired,
+        "login_expires": data.login_expires,
         "bin_types": bin_types,
         "invoice_count": len(data.invoice_items),
         "sanitation_contract_count": len((data.sanitation or {}).get("contracts", [])),

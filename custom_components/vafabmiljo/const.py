@@ -30,7 +30,13 @@ CONF_DEVICE_UUID = "device_uuid"
 # first POST /register. Named "bearer" rather than "token" here only to keep
 # this constant out of generic secret-scanners' pattern matching.
 CONF_DEVICE_BEARER = "device_bearer"
-CONF_SESSION_COOKIE = "session_cookie"  # vafab_session; None until BankID login completes
+# vafab_session of the app's own BankID login, used up to 0.5.x; no longer used for anything but
+# telling an entry that was logged in that way to log in to Mina sidor instead
+CONF_SESSION_COOKIE = "session_cookie"
+# The Mina sidor login (minasidor.py): the refreshToken cookie, when it runs out, and the last access token
+CONF_MS_REFRESH = "minasidor_refresh"
+CONF_MS_REFRESH_EXPIRES = "minasidor_refresh_expires"
+CONF_MS_ACCESS = "minasidor_access"
 CONF_ADDRESS = "address"
 CONF_CITY = "city"
 CONF_PLANT_ID = "plant_id"  # opaque per-address identifier returned by next-pickup/search
@@ -62,11 +68,9 @@ PENDING_POLL_TIMEOUT = 30
 BANKID_POLL_INTERVAL = 2
 BANKID_POLL_TIMEOUT = 300
 
-# How often the BankID session is kept alive (GET /authenticate/keep-alive), apart from the data
-# refresh. The backend's idle timeout isn't known - it is shorter than the default 30-minute
-# refresh, which let the session lapse between refreshes - so this pings well inside any plausible
-# timeout. One small GET per entry, only while a BankID session is active.
-KEEP_ALIVE_INTERVAL_SECONDS = 120
+# The Mina sidor login (minasidor.py): its refresh cookie runs out 7 days after the BankID login and
+# isn't extended by using it, so warn this long before (a repair and EVENT_LOGIN_EXPIRING).
+LOGIN_EXPIRY_WARNING_SECONDS = 2 * 24 * 3600
 
 # Options-flow key: user-configurable poll interval, in minutes.
 CONF_SCAN_INTERVAL = "scan_interval"
@@ -79,6 +83,7 @@ DEFAULT_SCAN_INTERVAL_MINUTES = 30  # this is a waste-collection calendar, not l
 # time the entity goes unavailable and back, e.g. on restart or a failed poll).
 EVENT_NEW_INVOICE = f"{DOMAIN}_new_invoice"
 EVENT_INVOICE_DUE_REMINDER = f"{DOMAIN}_invoice_due_reminder"
+EVENT_LOGIN_EXPIRING = f"{DOMAIN}_login_expiring"
 # Invoice payment statuses (as the backend spells them) that mean "nothing to pay".
 PAID_STATUSES = {"helt betald"}
 INVOICE_STORAGE_VERSION = 1

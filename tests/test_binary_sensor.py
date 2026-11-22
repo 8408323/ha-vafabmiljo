@@ -101,3 +101,21 @@ def test_connected_sensor_is_off_while_the_session_is_expired():
     coordinator = _coordinator(authenticated=True)
     coordinator.data.session_expired = True
     assert VafabMiljoConnectedBinarySensor(coordinator, _entry(session_cookie="abc123")).is_on is False
+
+
+async def test_setup_adds_connected_sensor_for_a_mina_sidor_login():
+    entry = _entry(minasidor_refresh="r1")
+    entry.runtime_data = _coordinator(authenticated=True)
+    added: list = []
+    await async_setup_entry(hass=None, entry=entry, async_add_entities=added.extend)
+    assert len(added) == 1
+    assert isinstance(added[0], VafabMiljoConnectedBinarySensor)
+
+
+def test_connected_sensor_reports_when_the_login_runs_out():
+    coordinator = _coordinator(authenticated=True)
+    sensor = VafabMiljoConnectedBinarySensor(coordinator, _entry(minasidor_refresh="r1"))
+    assert sensor.extra_state_attributes == {"login_expires": None}
+
+    coordinator.data.login_expires = 1800000000.0
+    assert sensor.extra_state_attributes == {"login_expires": "2027-01-15T08:00:00+00:00"}

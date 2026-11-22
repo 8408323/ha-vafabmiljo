@@ -518,6 +518,9 @@ def _install_stub_homeassistant() -> None:
         return _datetime.combine(value, _time(), tzinfo=dt_mod.DEFAULT_TIME_ZONE)
 
     dt_mod.now = _now
+    dt_mod.utcnow = lambda: _now().astimezone(_timezone.utc)
+    dt_mod.utc_from_timestamp = lambda ts: _datetime.fromtimestamp(ts, _timezone.utc)
+    dt_mod.as_local = lambda value: value.astimezone(dt_mod.DEFAULT_TIME_ZONE)
     dt_mod.start_of_local_day = _start_of_local_day
     util.dt = dt_mod
     sys.modules["homeassistant.util.dt"] = dt_mod

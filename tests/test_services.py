@@ -21,11 +21,11 @@ def _entry(coordinator=None):
 
 def _coordinator(pdf_bytes: bytes | Exception):
     coordinator = Mock()
-    coordinator.client = Mock()
+    coordinator.minasidor = Mock()
     if isinstance(pdf_bytes, Exception):
-        coordinator.client.download_invoice = AsyncMock(side_effect=pdf_bytes)
+        coordinator.minasidor.download_invoice = AsyncMock(side_effect=pdf_bytes)
     else:
-        coordinator.client.download_invoice = AsyncMock(return_value=pdf_bytes)
+        coordinator.minasidor.download_invoice = AsyncMock(return_value=pdf_bytes)
     return coordinator
 
 
@@ -81,7 +81,7 @@ async def test_download_invoice_accepts_string_invoice_id(tmp_path):
 
     written = _path_from_result(result, tmp_path)
     assert written.read_bytes() == b"%PDF-1.4 fake"
-    coordinator.client.download_invoice.assert_awaited_once_with(123)
+    coordinator.minasidor.download_invoice.assert_awaited_once_with(123)
 
 
 async def test_download_invoice_filename_is_not_the_predictable_invoice_id(tmp_path):
@@ -113,7 +113,7 @@ async def test_download_invoice_schedules_cleanup_that_deletes_the_file(tmp_path
 
 async def test_download_invoice_skips_entries_without_coordinator(tmp_path):
     coordinator = _coordinator(b"%PDF-1.4 fake")
-    hass = _hass_with_entries([_entry(None), _entry(coordinator)])
+    hass = _hass_with_entries([_entry(None), _entry(Mock(minasidor=None)), _entry(coordinator)])
     hass.config.path = lambda *parts: str(tmp_path.joinpath(*parts))
     async_setup_services(hass)
 
