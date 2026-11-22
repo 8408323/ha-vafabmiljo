@@ -328,3 +328,14 @@ async def test_apply_setting_without_fetched_settings_is_a_no_op():
     coordinator.data = VafabMiljoData(settings=None)
     coordinator.async_apply_setting("garbage", False)
     assert coordinator.data.settings is None
+
+
+def test_order_title_is_the_fee_text_with_the_waste_type():
+    from vafabmiljo.coordinator import _order_item
+
+    order = {"feeText": "Budning kärl", "orderTypeText": "Restavfall", "serviceName": "RESTAVFALL", "pricePerUnit": 512}
+    assert _order_item(order)["title"] == "Budning kärl (Restavfall)"
+    # the type already in the text is not repeated
+    assert _order_item({"feeText": "Extra tömning restavfall", "orderTypeText": "Restavfall"})["title"] == (
+        "Extra tömning restavfall"
+    )

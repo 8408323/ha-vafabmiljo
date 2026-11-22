@@ -72,9 +72,11 @@ class PanelLogin:
             CONF_MS_ACCESS: creds.access_token,
         }
         data.pop(CONF_SESSION_COOKIE, None)  # the app's own login is no longer used
+        # "done" first: the update listener's reload starts eagerly inside async_update_entry, and its
+        # unload drops a login that still says "waiting" - the panel then read "none" and showed a failure
+        self.status = "done"
         # the entry's update listener reloads it with the new login
         self._hass.config_entries.async_update_entry(self._entry, data=data)
-        self.status = "done"
         # a pending reauth flow (started when the login ran out) is answered now
         flows = self._hass.config_entries.flow.async_progress_by_handler(
             DOMAIN, match_context={"source": "reauth", "entry_id": self._entry.entry_id}

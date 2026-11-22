@@ -73,6 +73,11 @@ h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 2px
 .hero .seg { background: rgba(0,0,0,.18); border-color: rgba(255,255,255,.14); }
 .hero .seg button { color: rgba(255,255,255,.78); }
 .hero .seg button.on { background: #fff; color: #0f3d2b; }
+.hero-actions { display: flex; align-items: center; gap: 8px; }
+.theme-btn { width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); background: rgba(0,0,0,.18);
+  font-size: 17px; cursor: pointer; display: grid; place-items: center; backdrop-filter: blur(8px); transition: transform .2s, background .15s; flex: none; }
+.theme-btn:hover { background: rgba(255,255,255,.16); transform: rotate(-12deg); }
+.page { transition: background-color .25s, color .25s; }
 .hero .acct { color: #fff; border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.1); backdrop-filter: blur(8px); }
 .hero .acct:hover { background: rgba(255,255,255,.18); }
 .hero .acct.ok .acct-dot { background: #7dffb8; box-shadow: 0 0 0 3px rgba(125,255,184,.25); }

@@ -44,6 +44,12 @@ const en = {
   this_year: "This year",
   tagline: "Waste & recycling",
   upcoming: "Upcoming pickups",
+  appearance: "Appearance",
+  theme: "Theme",
+  theme_auto: "Auto",
+  theme_light: "Light",
+  theme_dark: "Dark",
+  theme_info: "Auto follows Home Assistant. The choice is remembered in this browser.",
 };
 export type T = typeof en;
 
@@ -92,6 +98,12 @@ const sv: T = {
   this_year: "I år",
   tagline: "Avfall & återvinning",
   upcoming: "Kommande tömningar",
+  appearance: "Utseende",
+  theme: "Tema",
+  theme_auto: "Auto",
+  theme_light: "Ljust",
+  theme_dark: "Mörkt",
+  theme_info: "Auto följer Home Assistant. Valet sparas i den här webbläsaren.",
 };
 
 const nb: T = {
@@ -139,6 +151,12 @@ const nb: T = {
   this_year: "I år",
   tagline: "Avfall & gjenvinning",
   upcoming: "Kommende tømminger",
+  appearance: "Utseende",
+  theme: "Tema",
+  theme_auto: "Auto",
+  theme_light: "Lyst",
+  theme_dark: "Mørkt",
+  theme_info: "Auto følger Home Assistant. Valget huskes i denne nettleseren.",
 };
 
 const da: T = {
@@ -186,6 +204,12 @@ const da: T = {
   this_year: "I år",
   tagline: "Affald & genbrug",
   upcoming: "Kommende tømninger",
+  appearance: "Udseende",
+  theme: "Tema",
+  theme_auto: "Auto",
+  theme_light: "Lyst",
+  theme_dark: "Mørkt",
+  theme_info: "Auto følger Home Assistant. Valget huskes i denne browser.",
 };
 
 const fi: T = {
@@ -233,6 +257,12 @@ const fi: T = {
   this_year: "Tänä vuonna",
   tagline: "Jätteet & kierrätys",
   upcoming: "Tulevat tyhjennykset",
+  appearance: "Ulkoasu",
+  theme: "Teema",
+  theme_auto: "Auto",
+  theme_light: "Vaalea",
+  theme_dark: "Tumma",
+  theme_info: "Auto seuraa Home Assistantia. Valinta muistetaan tässä selaimessa.",
 };
 
 const is_: T = {
@@ -280,6 +310,12 @@ const is_: T = {
   this_year: "Í ár",
   tagline: "Úrgangur & endurvinnsla",
   upcoming: "Næstu losanir",
+  appearance: "Útlit",
+  theme: "Þema",
+  theme_auto: "Sjálfvirkt",
+  theme_light: "Ljóst",
+  theme_dark: "Dökkt",
+  theme_info: "Sjálfvirkt fylgir Home Assistant. Valið er munað í þessum vafra.",
 };
 
 // code -> [strings, date locale, name in its own language]

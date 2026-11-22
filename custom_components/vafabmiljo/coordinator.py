@@ -316,5 +316,15 @@ def _order_item(order: Any) -> dict[str, Any]:
     """One extra-service order Mina sidor offers, with the "title" the orders sensor lists."""
     if not isinstance(order, dict):
         return {"title": str(order)}
-    title = order.get("name") or order.get("title") or order.get("description") or order.get("serviceName")
+    # Seen live: {"feeText": "Budning kärl rest- och matavfall", "orderTypeText": "Restavfall",
+    # "serviceName": "RESTAVFALL", "pricePerUnit": 512, ...} - feeText is what the order is
+    title = (
+        order.get("feeText")
+        or order.get("name")
+        or order.get("title")
+        or order.get("description")
+        or order.get("serviceName")
+    )
+    if title and order.get("orderTypeText") and order["orderTypeText"].lower() not in str(title).lower():
+        title = f"{title} ({order['orderTypeText']})"
     return {**order, "title": title}

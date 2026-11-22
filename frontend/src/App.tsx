@@ -13,6 +13,7 @@ type Addr = {
 type Ctx = { hass: any; t: T; locale: string };
 
 const TABS = ["overview", "invoices", "settings"] as const;
+type Theme = "auto" | "light" | "dark";
 type Tab = (typeof TABS)[number];
 const PAID = new Set(["helt betald"]);  // same as const.PAID_STATUSES
 
@@ -146,9 +147,18 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
   const admin = hass.user?.is_admin !== false;
   // one login dialog for the whole panel: the header chip, the overview banner and Settings all open it
   const onLogin = admin && a?.entryId ? lg.start : undefined;
+  // light / dark / auto, remembered per browser (like the language)
+  const [theme, setThemeState] = useState<Theme>(() => {
+    try { return (localStorage.getItem("vm_theme") as Theme) || "auto"; } catch { return "auto"; }
+  });
+  const setTheme = (x: Theme) => {
+    setThemeState(x);
+    try { x === "auto" ? localStorage.removeItem("vm_theme") : localStorage.setItem("vm_theme", x); } catch { /* private mode */ }
+  };
 
-  // its own light/dark look, following Home Assistant's dark mode (or the system's when HA doesn't say)
-  const dark = hass.themes?.darkMode ?? window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  // its own light/dark look: "auto" follows Home Assistant's dark mode (or the system's when HA doesn't say)
+  const sysDark = hass.themes?.darkMode ?? window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  const dark = theme === "auto" ? sysDark : theme === "dark";
   const nx = a ? nextPickup(a, ctx) : null;
 
   return (
@@ -157,9 +167,15 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
         <div className="wrap">
           <div className="hero-top">
             <div className="brand"><Logo /><span className="brand-name">{t.title}<small>{t.tagline}</small></span></div>
-            <nav className="tabs">
-              {TABS.map((x) => <button key={x} className={tab === x ? "on" : ""} onClick={() => go(x)}>{t[`tab_${x}`]}</button>)}
-            </nav>
+            <div className="hero-actions">
+              <nav className="tabs">
+                {TABS.map((x) => <button key={x} className={tab === x ? "on" : ""} onClick={() => go(x)}>{t[`tab_${x}`]}</button>)}
+              </nav>
+              <button className="theme-btn" onClick={() => setTheme(dark ? "light" : "dark")}
+                title={dark ? t.theme_light : t.theme_dark} aria-label={dark ? t.theme_light : t.theme_dark}>
+                {dark ? "☀️" : "🌙"}
+              </button>
+            </div>
           </div>
           {a && <div className="hero-main">
             <div>
@@ -184,7 +200,7 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
             <LoginBanner li={li} t={t} onLogin={onLogin} />
             {tab === "overview" && <Overview {...ctx} a={a} />}
             {tab === "invoices" && <Invoices {...ctx} a={a} />}
-            {tab === "settings" && <Settings {...ctx} a={a} li={li} onLogin={onLogin} lang={lang} setLang={setLang} />}
+            {tab === "settings" && <Settings {...ctx} a={a} li={li} onLogin={onLogin} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} />}
           </>
         )}
       </main>
@@ -357,15 +373,16 @@ function Invoices({ a, hass, t, locale }: Ctx & { a: Addr }) {
 }
 
 /* ---------------- Settings ---------------- */
-function Settings({ a, hass, t, li, onLogin, lang, setLang }:
-  Ctx & { a: Addr; li: LoginInfo; onLogin?: () => void; lang: string | null; setLang: (x: string | null) => void }) {
+function Settings({ a, hass, t, li, onLogin, lang, setLang, theme, setTheme }:
+  Ctx & { a: Addr; li: LoginInfo; onLogin?: () => void; lang: string | null; setLang: (x: string | null) => void;
+    theme: Theme; setTheme: (x: Theme) => void }) {
   return (
     <div className="settings-grid">
       <Account li={li} t={t} onLogin={onLogin} />
       {/* keyed by entry: switching address starts fresh, so one address's list can't be saved to another */}
       <Recipients key={`rec-${a.entryId}`} a={a} hass={hass} t={t} />
       <div className="card">
-        <h2>{t.language}</h2>
+        <h2>{t.appearance}</h2>
         <label className="row">
           <span>{t.language}</span>
           <select value={lang ?? ""} onChange={(e) => setLang(e.target.value || null)}>
@@ -373,6 +390,17 @@ function Settings({ a, hass, t, li, onLogin, lang, setLang }:
             {Object.entries(LANGS).map(([code, [, , name]]) => <option key={code} value={code}>{name}</option>)}
           </select>
         </label>
+        <div className="row">
+          <span>{t.theme}</span>
+          <div className="seg">
+            {(["auto", "light", "dark"] as const).map((x) => (
+              <button key={x} className={theme === x ? "on" : ""} onClick={() => setTheme(x)}>
+                {x === "auto" ? t.theme_auto : x === "light" ? `☀️ ${t.theme_light}` : `🌙 ${t.theme_dark}`}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="muted">{t.theme_info}</div>
       </div>
       {a.switches.length > 0 && <div className="card">
         <h2>{t.notifications}</h2>

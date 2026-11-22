@@ -218,3 +218,19 @@ async def test_concurrent_starts_leave_only_one_login_running(setup):
     tasks = [t for t in asyncio.all_tasks() if t.get_coro().__qualname__ == "PanelLogin._poll" and not t.done()]
     assert tasks == [running.task]  # the first one was cancelled, none orphaned
     async_cancel_login(s.hass, s.entry.entry_id)
+
+
+async def test_an_eager_reload_inside_the_save_keeps_the_done_login(setup):
+    # HA starts the update listener eagerly inside async_update_entry: its reload unloads the entry, and
+    # the unload hook drops a login that still says "waiting" - the panel then read "none" (a failure)
+    s = setup
+
+    def update_and_reload(entry, data):
+        s.updates.append(data)
+        async_cancel_login(s.hass, entry.entry_id)
+
+    s.hass.config_entries.async_update_entry = update_and_reload
+    await ws_start(s.hass, s.conn, {"id": 1, "entry_id": s.entry.entry_id})
+    await s.hass.data[KEY][s.entry.entry_id].task
+    ws_status(s.hass, s.conn, {"id": 2, "entry_id": s.entry.entry_id})
+    assert _result(s)["status"] == "done"
