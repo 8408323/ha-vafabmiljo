@@ -197,7 +197,8 @@ class VafabMiljoClient:
         app always calls this in parallel with properties/invoices/parameters
         right after login. The response includes personal data (name, SSN,
         contact info), so the coordinator calls this purely for the side
-        effect and discards the result - never store or expose it as an
+        effect and discards the result (apart from its `no_customer` flag, see
+        VafabMiljoCoordinator) - never store or expose it as an
         entity.
         """
         return await self._request("GET", "/services/customer")
@@ -232,6 +233,10 @@ class VafabMiljoClient:
 
     async def get_complaints(self) -> dict[str, Any]:
         return await self._request("GET", "/services/complaints")
+
+    async def get_settings(self) -> dict[str, Any]:
+        """This device's notification settings (garbage, news, status, time, ...), as the app shows them."""
+        return await self._request("GET", "/settings")
 
     async def update_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/settings", json=patch, allow_pending=False)

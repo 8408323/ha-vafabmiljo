@@ -249,3 +249,9 @@ async def test_set_address_sends_expected_body(client: VafabMiljoClient):
             "address_enabled": True,
             "notification_enabled": True,
         }
+
+
+async def test_get_settings(client: VafabMiljoClient):
+    with aioresponses() as mocked:
+        mocked.get(f"{API_BASE}/settings", payload={"garbage": True, "time": "19:00"})
+        assert await client.get_settings() == {"garbage": True, "time": "19:00"}

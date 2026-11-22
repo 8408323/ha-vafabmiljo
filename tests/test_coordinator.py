@@ -306,3 +306,97 @@ async def test_refresh_saves_a_rotated_cookie():
     await coordinator._async_update_data()
 
     assert coordinator.entry.data["session_cookie"] == "abc123"
+
+
+# -- No customer record for the logged-in person -----------------------------------------------------
+
+_NO_CUSTOMER = {"status": "error", "code": "api_error", "message": "No customer data", "no_customer": True}
+
+
+async def test_no_customer_skips_account_endpoints_and_raises_a_repair(caplog):
+    # seen live: /services/customer answers 200 with no_customer, parameters then 404s and sanitation 500s
+    client = _authenticated_client(get_customer=AsyncMock(return_value=_NO_CUSTOMER))
+    client.get_settings.return_value = {"garbage": True}
+    coordinator = _make_coordinator(client)
+
+    data = await coordinator._async_update_data()
+
+    assert data.authenticated is True
+    assert data.no_customer is True
+    assert data.session_expired is False
+    assert data.settings == {"garbage": True}
+    assert data.invoices is None
+    for skipped in (client.get_invoices, client.get_sanitation, client.get_properties, client.get_parameters):
+        skipped.assert_not_called()
+    issue = coordinator.hass.data["_issues"][("vafabmiljo", "no_customer_test_entry")]
+    assert issue["severity"] == "warning"
+    assert issue["translation_key"] == "no_customer"
+    assert issue["translation_placeholders"] == {"address": "Testgatan 1, Teststad"}
+    assert "no customer data" in caplog.text
+
+
+async def test_no_customer_is_logged_once_not_every_refresh(caplog):
+    client = _authenticated_client(get_customer=AsyncMock(return_value=_NO_CUSTOMER))
+    coordinator = _make_coordinator(client)
+
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+
+    assert caplog.text.count("no customer data") == 1
+
+
+async def test_customer_data_coming_back_clears_the_no_customer_repair(caplog):
+    client = _authenticated_client(get_customer=AsyncMock(return_value=_NO_CUSTOMER))
+    coordinator = _make_coordinator(client)
+    await coordinator._async_update_data()
+
+    client.get_customer = AsyncMock(return_value={"status": "ok"})
+    data = await coordinator._async_update_data()
+
+    assert data.no_customer is False
+    assert ("vafabmiljo", "no_customer_test_entry") not in coordinator.hass.data["_issues"]
+    client.get_invoices.assert_awaited()
+
+    # and if it disappears again, that is logged again
+    client.get_customer = AsyncMock(return_value=_NO_CUSTOMER)
+    await coordinator._async_update_data()
+    assert caplog.text.count("no customer data") == 2
+
+
+async def test_settings_are_fetched_with_the_account_data():
+    client = _authenticated_client()
+    client.get_settings.return_value = {"garbage": False, "time": "07:30"}
+
+    data = await _make_coordinator(client)._async_update_data()
+
+    assert data.settings == {"garbage": False, "time": "07:30"}
+
+
+async def test_failing_or_odd_settings_are_ignored(caplog):
+    client = _authenticated_client()
+    client.get_settings.side_effect = VafabMiljoError("boom")
+    assert (await _make_coordinator(client)._async_update_data()).settings is None
+
+    client.get_settings.side_effect = None
+    client.get_settings.return_value = ["not", "a", "dict"]
+    assert (await _make_coordinator(client)._async_update_data()).settings is None
+
+
+async def test_apply_setting_updates_the_fetched_settings():
+    client = _authenticated_client()
+    client.get_settings.return_value = {"garbage": True, "news": True}
+    coordinator = _make_coordinator(client)
+    coordinator.data = await coordinator._async_update_data()
+
+    coordinator.async_apply_setting("garbage", False)
+
+    assert coordinator.data.settings == {"garbage": False, "news": True}
+
+
+async def test_apply_setting_without_fetched_settings_is_a_no_op():
+    coordinator = _make_coordinator(_authenticated_client())
+    coordinator.data = None
+    coordinator.async_apply_setting("garbage", False)  # before the first refresh
+    coordinator.data = VafabMiljoData(settings=None)
+    coordinator.async_apply_setting("garbage", False)
+    assert coordinator.data.settings is None

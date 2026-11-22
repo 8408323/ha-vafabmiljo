@@ -125,6 +125,10 @@
     "bankid_expired": {
       "title": "VafabMiljö: logga in med BankID igen",
       "description": "BankID-inloggningen för **{address}** har gått ut, så fakturor och avgifter uppdateras inte längre (tömningsdatum gör det fortfarande). Öppna VafabMiljö-panelen (Läs mer), gå till **Inställningar → Konto** och klicka **Logga in igen**."
+    },
+    "no_customer": {
+      "title": "VafabMiljö: inget kundkonto för den här BankID-inloggningen",
+      "description": "VafabMiljö svarar att personen som loggade in med BankID för **{address}** saknar kunddata, så fakturor, avgifter och beställningar kan inte hämtas (tömningsdatum fungerar fortfarande). Logga in med den person som abonnemanget står på. Om det redan är så och VafabMiljö-appen inte heller visar några fakturor, kontakta VafabMiljös kundtjänst - då saknas kontot hos dem. Meddelandet försvinner av sig självt när VafabMiljö skickar kunddatan igen."
     }
   }
 }

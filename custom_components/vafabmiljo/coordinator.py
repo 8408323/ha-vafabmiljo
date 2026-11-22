@@ -61,6 +61,10 @@ def bankid_issue_id(entry_id: str) -> str:
     return f"bankid_expired_{entry_id}"
 
 
+def no_customer_issue_id(entry_id: str) -> str:
+    return f"no_customer_{entry_id}"
+
+
 @dataclass
 class VafabMiljoData:
     """Everything the coordinator fetched on the last successful refresh."""
@@ -69,6 +73,10 @@ class VafabMiljoData:
     authenticated: bool = False
     # BankID configured, but the backend rejected the session: account data is missing until a new login
     session_expired: bool = False
+    # Logged in, but VafabMiljö has no customer record for that person: no invoices, fees or orders
+    no_customer: bool = False
+    # This device's notification settings from GET /settings (None if not fetched)
+    settings: dict[str, Any] | None = None
     invoices: dict[str, Any] | None = None
     sanitation: dict[str, Any] | None = None
     properties: dict[str, Any] | None = None
@@ -150,6 +158,7 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         # The entry as this coordinator was built from it, plus the cookies it saved itself since. An
         # update that differs from this came from elsewhere (options, a login, a reauth) and reloads
         # the entry; saving a rotated cookie must not (see is_own_entry_update).
+        self._no_customer = False  # to log the missing customer record once, not every refresh
         self._entry_data = dict(entry.data)
         self._entry_options = dict(entry.options)
 
@@ -243,13 +252,46 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         # Confirmed live: an account with invoices stuck returning 202
         # "waiting" for hours started returning 200 immediately after one
         # call to this endpoint. See VafabMiljoClient.get_customer for why -
-        # its own data is discarded here, only the side effect matters.
+        # its own data is discarded here, only the side effect and the
+        # no_customer flag matter.
+        no_customer = False
         try:
-            await self.client.get_customer()
+            customer = await self.client.get_customer()
         except VafabMiljoAuthError:
             raise
         except VafabMiljoError as err:
             _LOGGER.warning("Failed to fetch customer record: %s", err)
+        else:
+            no_customer = isinstance(customer, dict) and customer.get("no_customer") is True
+
+        settings = await self._try_fetch("settings", self.client.get_settings)
+        if not isinstance(settings, dict):
+            settings = None
+
+        if no_customer:
+            # Seen live: the backend answers 200 {"no_customer": true, "message": "No customer data"} when
+            # its customer system returns nothing for the logged-in person - then /services/parameters
+            # answers 404 with the same message, /services/sanitation crashes with a 500 and
+            # properties/invoices are empty. Skip them and say so once, instead of a warning per refresh.
+            if not self._no_customer:
+                _LOGGER.warning(
+                    "VafabMiljö has no customer data for the BankID login of %s; invoices, fees and orders "
+                    "can't be fetched",
+                    self.entry.title,
+                )
+            self._no_customer = True
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                no_customer_issue_id(self.entry.entry_id),
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="no_customer",
+                translation_placeholders={"address": self.entry.title},
+            )
+            return VafabMiljoData(pickups=pickups, authenticated=True, no_customer=True, settings=settings)
+        self._no_customer = False
+        ir.async_delete_issue(self.hass, DOMAIN, no_customer_issue_id(self.entry.entry_id))
 
         invoices = await self._try_fetch("invoices", self.client.get_invoices)
         sanitation = await self._try_fetch("sanitation", self.client.get_sanitation)
@@ -272,7 +314,14 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
             parameters=parameters,
             orders=orders,
             complaints=complaints,
+            settings=settings,
         )
+
+    @callback
+    def async_apply_setting(self, field: str, value: Any) -> None:
+        """Record a setting the backend just accepted, so entities don't flip back until the next refresh."""
+        if self.data is not None and self.data.settings is not None:
+            self.data.settings = {**self.data.settings, field: value}
 
     async def _try_fetch(self, name: str, fetch: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any] | None:
         """Fetch one piece of account data, tolerating a stuck/failing endpoint.
