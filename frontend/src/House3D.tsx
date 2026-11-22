@@ -85,10 +85,57 @@ export default function House3D({ bins, truck, dark, accent, onFail }: Props) {
       return mesh;
     };
 
-    // light: sky/ground fill and a low sun from the front-left, casting soft shadows
-    scene.add(new THREE.HemisphereLight(dark ? "#9fb7c9" : "#ffffff", dark ? "#2a3f32" : "#9fbf8a", dark ? 0.95 : 0.85));
-    const sun = new THREE.DirectionalLight(dark ? "#cfe0ff" : "#fff4e0", dark ? 1.6 : 2.3);
-    sun.position.set(-9, 16, 14);
+    // Day in the light theme, night in the dark one: a sky dome, then sun or moon light casting soft shadows
+    const night = dark;
+    const skyTop = night ? "#040a17" : "#6fb1e6", skyLow = night ? "#16283a" : "#e4f1fb";
+    (scene.fog as THREE.Fog).color.set(skyLow);
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(95, 32, 16),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide, depthWrite: false, fog: false,
+        uniforms: { top: { value: new THREE.Color(skyTop) }, low: { value: new THREE.Color(skyLow) } },
+        vertexShader: "varying vec3 vP; void main(){ vP = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+        fragmentShader: "uniform vec3 top; uniform vec3 low; varying vec3 vP; void main(){ float h = clamp(normalize(vP).y * 1.6, 0.0, 1.0); gl_FragColor = vec4(mix(low, top, pow(h, 0.7)), 1.0); }",
+      }),
+    );
+    scene.add(sky);
+    const clouds: THREE.Group[] = [];
+    if (night) {
+      // stars on the upper half of the dome, and the moon
+      const n = 450, pos = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const u = Math.random() * Math.PI * 2, v = Math.acos(1 - Math.random() * 0.9);
+        pos.set([88 * Math.sin(v) * Math.cos(u), 88 * Math.cos(v), 88 * Math.sin(v) * Math.sin(u)], i * 3);
+      }
+      const stars = new THREE.Points(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pos, 3)),
+        new THREE.PointsMaterial({ color: "#ffffff", size: 0.45, sizeAttenuation: true, fog: false, transparent: true, opacity: 0.85 }));
+      scene.add(stars);
+      const moon = new THREE.Mesh(new THREE.SphereGeometry(2.6, 24, 16), new THREE.MeshBasicMaterial({ color: "#f4f1de", fog: false }));
+      moon.position.set(-34, 38, -46);
+      scene.add(moon);
+    } else {
+      // a few soft clouds drifting by
+      const cloudMat = new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 1, flatShading: true, fog: false });
+      for (const [cx, cy, cz, s] of [[-30, 26, -40, 1.6], [12, 30, -55, 2.1], [38, 24, -20, 1.4], [-45, 22, 10, 1.3]]) {
+        const c = new THREE.Group();
+        for (const [ox, oy, r] of [[0, 0, 2.4], [2.6, 0.4, 1.9], [-2.4, 0.2, 1.8], [0.8, 1.3, 1.7]]) {
+          const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(r * s, 1), cloudMat);
+          puff.position.set(ox * s, oy * s, 0);
+          puff.scale.y = 0.62;
+          c.add(puff);
+        }
+        c.position.set(cx, cy, cz);
+        scene.add(c);
+        clouds.push(c);
+      }
+      const sunDisc = new THREE.Mesh(new THREE.SphereGeometry(3, 24, 16), new THREE.MeshBasicMaterial({ color: "#fff6d6", fog: false }));
+      sunDisc.position.set(-40, 48, 46);
+      scene.add(sunDisc);
+    }
+    scene.add(new THREE.HemisphereLight(night ? "#7d93c8" : "#ffffff", night ? "#1c2a24" : "#9fbf8a", night ? 0.55 : 0.85));
+    const sun = new THREE.DirectionalLight(night ? "#9db8ff" : "#fff4e0", night ? 0.9 : 2.3);
+    if (night) sun.position.set(-12, 15, -14);  // moonlight from behind-left
+    else sun.position.set(-9, 16, 14);
     sun.target.position.set(1.5, 0, 3.5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -106,6 +153,26 @@ export default function House3D({ bins, truck, dark, accent, onFail }: Props) {
     box(-14, 17, 6.95, 8.65, -0.02, 0.01, mat(pal.road, { roughness: 0.95 }));
     box(-14, 17, 6.85, 6.97, 0, 0.1, mat(pal.curb));
     for (let x = -13; x < 17; x += 2.2) box(x, x + 1.1, 7.75, 7.85, 0.01, 0.015, mat("#e9edf2", { roughness: 0.6 }));
+
+    // street lamps along the curb and a lamp by the door - lit at night
+    const lampGlow = mat(night ? "#ffe2a8" : "#f2f2ea", night ? { emissive: new THREE.Color("#ffc56b"), emissiveIntensity: 2.2 } : { roughness: 0.3 });
+    const pole = mat("#3a3f48", { metalness: 0.5, roughness: 0.45 });
+    for (const lx of [-7.2, 10.2]) {
+      box(lx - 0.07, lx + 0.07, 6.5, 6.64, 0, 3.7, pole);
+      box(lx - 0.05, lx + 0.05, 6.5, 7.35, 3.6, 3.7, pole);
+      box(lx - 0.2, lx + 0.2, 7.15, 7.55, 3.48, 3.62, lampGlow);
+      if (night) {
+        const l = new THREE.PointLight("#ffc56b", 14, 9, 2);
+        l.position.set(lx, 3.3, 7.35);
+        scene.add(l);
+      }
+    }
+    box(4.5, 4.62, 3.5, 3.62, 1.95, 2.15, lampGlow);
+    if (night) {
+      const porch = new THREE.PointLight("#ffc56b", 4, 5, 2);
+      porch.position.set(4.56, 2.0, 3.9);
+      scene.add(porch);
+    }
 
     // house: walls, gables, a pitched roof with a small overhang, windows, a door and a chimney
     const wall = mat(pal.wall, { roughness: 0.7 });
@@ -287,6 +354,7 @@ export default function House3D({ bins, truck, dark, accent, onFail }: Props) {
         const beacon = truckGroup.userData.beacon as THREE.Mesh;
         (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = REDUCED ? 0.8 : 0.3 + 0.9 * (Math.sin(t * 8) > 0 ? 1 : 0);
       }
+      if (!REDUCED) for (const c of clouds) c.position.x = ((c.position.x + 60 + 0.012) % 120) - 60;  // drifting
       controls.update();
       renderer.render(scene, camera);
     };

@@ -9318,7 +9318,7 @@ function m(e, t) {
 }
 //#endregion
 //#region src/App.tsx
-var h = e(), g = (0, d.lazy)(() => import("./House3D-qSM2FPQ2.js")), _ = class extends d.Component {
+var h = e(), g = (0, d.lazy)(() => import("./House3D-BrKC-uyB.js")), _ = class extends d.Component {
 	state = { failed: !1 };
 	static getDerivedStateFromError() {
 		return { failed: !0 };
