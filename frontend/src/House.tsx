@@ -9,16 +9,16 @@ const pts = (vs: V[]) => vs.map((v) => P(v).join(",")).join(" ");
 
 // Bins as at Öster Råby: green Restavfall, brown 140 l Matavfall, black two-lid SULO for plastic + paper.
 // Sizes in metres (approx. EN 840: w = width along the wall, d = depth, h = height), drawn at 1.3x so they read at this scale.
-type Spec = { re: RegExp; body: string; lid: string; w: number; d: number; h: number; split?: boolean };
+export type Spec = { re: RegExp; body: string; lid: string; w: number; d: number; h: number; split?: boolean };
 const SPECS: Spec[] = [
   { re: /papp|plast|förpack|tidning/i, body: "#24272c", lid: "#30343b", w: 0.86, d: 0.87, h: 1.1, split: true },
   { re: /mat|bio|kompost/i, body: "#6b4226", lid: "#7a4e30", w: 0.48, d: 0.555, h: 1.065 },
   { re: /rest|hush/i, body: "#7fa66a", lid: "#9cc08a", w: 0.48, d: 0.73, h: 1.07 },
 ];
 const OTHER: Spec = { re: /./, body: "#4a5260", lid: "#5d6675", w: 0.58, d: 0.73, h: 1.07 };
-const spec = (type: string) => SPECS.find((x) => x.re.test(type)) ?? OTHER;
+export const spec = (type: string) => SPECS.find((x) => x.re.test(type)) ?? OTHER;
 export const binColor = (type: string) => { const s = spec(type); return s === SPECS[0] ? "#8e44ad" : s.lid; };
-const K = 1.3;
+export const K = 1.3;
 
 export type SceneBin = { type: string; when: string; sub: string; days: number | null; next: boolean };
 

@@ -240,3 +240,9 @@ select { font: inherit; color: inherit; background: var(--vm-card); border: 1px 
 .kpis > .stat:hover { transform: translateY(-1px); box-shadow: 0 8px 24px -16px rgba(0,0,0,.35); }
 .value.pos { color: var(--vm-pos); }
 .brand { flex-wrap: wrap; }
+
+/* 3D scene (House3D.tsx) */
+.scene3d { width: 100%; aspect-ratio: 16 / 10; min-height: 260px; border-radius: 14px; overflow: hidden; cursor: grab; touch-action: none;
+  background: radial-gradient(120% 90% at 50% 40%, color-mix(in srgb, var(--vm-accent) 10%, transparent), transparent 70%); }
+.scene3d:active { cursor: grabbing; }
+.scene3d canvas { display: block; width: 100% !important; height: 100% !important; }
