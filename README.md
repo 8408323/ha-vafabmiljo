@@ -46,10 +46,9 @@ that anymore).
 2. Search for and select your address. This works anonymously and immediately gives you
    next-pickup-date sensors, per-bin-type "X tomorrow" binary sensors, and a
    Notification time entity - none of this needs BankID.
-3. Setup asks whether to connect BankID too; you can skip it. Everything account-related
-   (invoices with PDFs, contract fees, property, the app's notification switches) appears
-   once you log in with BankID, which you can do any time from the **VafabMiljö** panel in
-   the sidebar - see [Authentication](#authentication).
+3. Everything account-related (invoices with PDFs, fees, property, autogiro) appears once
+   you log in to VafabMiljö **Mina sidor** with BankID, which you do from the **VafabMiljö**
+   panel in the sidebar - see [Authentication](#authentication).
 4. Have more than one VafabMiljö property/address? Just repeat setup for each one - a
    second entry for a different address is fine. Adding the *same* address twice is
    blocked. Moved, or picked the wrong address? Reconfigure the entry (⋮ → Reconfigure)
@@ -67,9 +66,9 @@ Available in English and Swedish, matching HA's own language setting.
 - Per-bin-type "pickup tomorrow" binary sensors and a local Notification time entity, as
   building blocks for your own HA-side reminders/automations (separate from the app's own
   push notifications)
-- BankID login for account data: invoices (with a full history attribute and a
-  `download_invoice` service action for the PDF), waste-contract fees, property details,
-  and available order/complaint types
+- BankID login to Mina sidor for account data: invoices (with a full history attribute and a
+  `download_invoice` service action for the PDF), fees per service, property details with
+  autogiro, and available extra orders
 - Notification-preference switches and reminder-time entity, mirroring the app's own
   settings
 - `vafabmiljo_new_invoice` / `vafabmiljo_invoice_due_reminder` events, fired exactly once
@@ -80,10 +79,9 @@ Available in English and Swedish, matching HA's own language setting.
   with PDF links and a per-year total, contract fees, and the notification switches/times.
   Language follows Home Assistant or can be set in the panel: Swedish, Norwegian, Danish,
   Finnish, Icelandic, English
-- **BankID login from the panel** (Settings → Account): scan the QR or open BankID on the same
-  phone. Setup no longer asks for BankID by default; connect (or log in again when the session
-  has expired) from the panel whenever you want invoices and fees. The setup and
-  reauthentication dialogs also have an **Open BankID on this device** link next to the QR
+- **BankID login from the panel**: scan the live QR or open BankID on the same phone. The
+  header shows how long the login has left, and a banner with a **Log in again** button
+  appears when it's about to run out
 - **Notifications per recipient**, set up in the panel (Settings → Notifications from Home
   Assistant): pick a phone (or any notify service), whether it gets the pickup reminder
   (the evening before or the same morning, at its own time), new invoices and invoice-due
@@ -100,40 +98,41 @@ data (`?in=0` / `?in=1` shifts the pickups to today / tomorrow, `?due=2` makes o
 
 ## Authentication
 
-Account data uses **Swedish BankID**, same as the app. Log in from the panel:
+Account data comes from VafabMiljö's customer portal **Mina sidor** (minasidor.vafabmiljo.se),
+with **Swedish BankID**. (Up to 0.5.x it came from the app's own API, which since November 2026
+answers "No customer data" - the VafabMiljö app can't log in either. The pickup schedule and the
+app's notification settings still come from the app API, without any login.) Log in from the panel:
 
-1. Open **VafabMiljö** in the sidebar → **Settings** → **Account (BankID)**.
-2. Click **Log in with BankID** (or **Log in again**). A dialog shows a QR code.
-3. Scan it with the BankID app on another device. **On a phone or tablet**, tap **Open BankID
-   on this device** instead: BankID opens on the same device, you approve there and switch
-   back to Home Assistant (the app or the browser).
-4. When BankID confirms, the dialog says you're logged in and the integration reloads
-   with your invoices, fees and property. The QR rotates while you wait; if it expires
-   (about 30 seconds) just click **Try again**.
+1. Open **VafabMiljö** in the sidebar and click **Log in** in the banner, the login chip in the
+   header, or **Settings → Account (Mina sidor)**.
+2. A dialog shows a live QR code. Scan it with the BankID app on another device. **On a phone or
+   tablet**, tap **Open BankID on this device** instead: BankID opens on the same device, you
+   approve there and switch back to Home Assistant (the app or the browser).
+3. When BankID confirms, the dialog says you're logged in and the integration reloads with your
+   invoices, fees and property. An unscanned QR is replaced by a new one by itself.
 
-Only Home Assistant administrators can start a login. You can also connect BankID in the
-setup dialog when adding the integration, or answer Home Assistant's reauthentication prompt
-when the login has expired. Both show the QR code and an **Open BankID on this device** link,
-so they work from the phone too. After you approve in BankID, switch back to Home Assistant
-and the dialog continues by itself.
+Only Home Assistant administrators can start a login. Setup itself doesn't log in, and Home
+Assistant's reauthentication prompt points to the panel: a dialog can't keep an animated BankID
+QR up to date.
 
 The same-device link is BankID's universal link (`https://app.bankid.com/?autostarttoken=…&redirect=null`).
 The panel uses `bankid:///` on a computer, which is what BankID for desktop answers to.
 `redirect=null` means BankID doesn't send you anywhere afterwards. On Android it usually
 goes back to Home Assistant by itself; on iPhone, switch back yourself.
 
-**Staying logged in.** While a BankID session is active the integration calls the backend's
-keep-alive every 2 minutes (independently of the refresh interval), and saves the session
-cookie whenever the backend renews it, so a restart picks up the live session. It talks to the
-backend through its own HTTP session without a shared cookie jar, so several addresses, a setup
-or a login can't swap each other's sessions.
+**How long it lasts.** A Mina sidor login lasts **7 days** and can't be extended - that's
+Mina sidor's own limit (its refresh cookie). Within those 7 days the integration renews the
+15-minute access token by itself, also across restarts. Two days before the end it adds a
+**Settings → Repairs** warning, the panel shows a banner, and the event
+`vafabmiljo_login_expiring` is fired once (with `address` and `expires`), so you can send
+yourself a phone reminder and log in again with two taps.
 
-**When the login expires.** BankID sessions expire after a while. The integration then:
+**When the login has run out.** The integration then:
 
 - keeps the pickup sensors, calendar and pickup reminders working (they need no login),
 - shows **Login expired** on the panel's Account card and turns the *BankID connected*
   sensor off,
-- starts Home Assistant's own reauthentication prompt (Settings → Devices & services),
+- shows a **Log in again** banner at the top of the panel,
 - adds a **Settings → Repairs** entry whose *Learn more* link opens the VafabMiljö panel; it
   disappears by itself once you've logged in again (or the integration is disabled),
 - sends a one-time **"Login expired"** notification to every recipient that has it turned

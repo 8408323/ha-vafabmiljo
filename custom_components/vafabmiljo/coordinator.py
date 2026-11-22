@@ -10,18 +10,27 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import VafabMiljoAuthError, VafabMiljoClient, VafabMiljoError
 from .const import (
+    CONF_ADDRESS,
     CONF_SCAN_INTERVAL,
     CONF_SESSION_COOKIE,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
-    KEEP_ALIVE_INTERVAL_SECONDS,
+    EVENT_LOGIN_EXPIRING,
+    LOGIN_EXPIRY_WARNING_SECONDS,
+)
+from .minasidor import (
+    MinaSidorClient,
+    invoices_payload,
+    pick_building,
+    properties_payload,
+    sanitation_payload,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,7 +71,12 @@ def bankid_issue_id(entry_id: str) -> str:
 
 
 def no_customer_issue_id(entry_id: str) -> str:
+    # raised by 0.5.3 (app API without customer data); only ever deleted now
     return f"no_customer_{entry_id}"
+
+
+def expiring_issue_id(entry_id: str) -> str:
+    return f"login_expiring_{entry_id}"
 
 
 @dataclass
@@ -73,8 +87,8 @@ class VafabMiljoData:
     authenticated: bool = False
     # BankID configured, but the backend rejected the session: account data is missing until a new login
     session_expired: bool = False
-    # Logged in, but VafabMiljö has no customer record for that person: no invoices, fees or orders
-    no_customer: bool = False
+    # When the Mina sidor login (its 7-day refresh cookie) runs out, epoch seconds; None without a login
+    login_expires: float | None = None
     # This device's notification settings from GET /settings (None if not fetched)
     settings: dict[str, Any] | None = None
     invoices: dict[str, Any] | None = None
@@ -141,7 +155,13 @@ class VafabMiljoData:
 class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
     """Polls the VafabMiljö backend for pickup schedule and (if logged in) account data."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, client: VafabMiljoClient) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        client: VafabMiljoClient,
+        minasidor: MinaSidorClient | None = None,
+    ) -> None:
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES)
         super().__init__(
             hass,
@@ -150,58 +170,13 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
             update_interval=timedelta(minutes=scan_interval),
         )
         self.entry = entry
-        self.client = client
+        self.client = client  # the app API, without login: pickups and notification settings
+        self.minasidor = minasidor  # Mina sidor, with the BankID login: invoices, fees, property
         # Set by __init__ after the first refresh; None until then (and in tests
         # that build a coordinator directly).
         self.invoice_notifier: Any = None
         self.reminders: Any = None  # reminders.VafabMiljoNotifier, set by __init__
-        # The entry as this coordinator was built from it, plus the cookies it saved itself since. An
-        # update that differs from this came from elsewhere (options, a login, a reauth) and reloads
-        # the entry; saving a rotated cookie must not (see is_own_entry_update).
-        self._no_customer = False  # to log the missing customer record once, not every refresh
-        self._entry_data = dict(entry.data)
-        self._entry_options = dict(entry.options)
-
-    # -- Keeping the BankID session alive ------------------------------------------
-
-    @callback
-    def async_start_keep_alive(self) -> CALLBACK_TYPE:
-        """Ping keep-alive between refreshes; the returned callback stops it."""
-        return async_track_time_interval(
-            self.hass,
-            self._async_keep_alive,
-            timedelta(seconds=KEEP_ALIVE_INTERVAL_SECONDS),
-            name=f"{DOMAIN} BankID keep-alive",
-        )
-
-    async def _async_keep_alive(self, _now: Any = None) -> None:
-        if not self.client.session_cookie or self.data is None or self.data.session_expired:
-            return  # no session to keep, or already expired: a new login reloads the entry
-        try:
-            await self.client.keep_alive()
-        except VafabMiljoAuthError:
-            # handled in one place: the refresh raises the repair, starts reauth and marks it expired
-            await self.async_refresh()
-            return
-        except VafabMiljoError as err:
-            _LOGGER.debug("BankID keep-alive failed, retrying at the next one: %s", err)
-            return
-        self._persist_session_cookie()
-
-    @callback
-    def _persist_session_cookie(self) -> None:
-        """Save a cookie the backend rotated, so a restart resumes the live session, not an older one."""
-        cookie = self.client.session_cookie
-        if not cookie or cookie == self.entry.data.get(CONF_SESSION_COOKIE):
-            return
-        if dict(self.entry.data) != self._entry_data:
-            return  # a login or reauth just saved its own session; the reload it triggers takes it from there
-        self._entry_data = {**self._entry_data, CONF_SESSION_COOKIE: cookie}
-        self.hass.config_entries.async_update_entry(self.entry, data=self._entry_data)
-
-    def is_own_entry_update(self, entry: ConfigEntry) -> bool:
-        """Whether the entry only changed by this coordinator saving a rotated cookie (no reload needed)."""
-        return dict(entry.data) == self._entry_data and dict(entry.options) == self._entry_options
+        self._expiry_announced = False  # EVENT_LOGIN_EXPIRING once per login, not every refresh
 
     async def _async_update_data(self) -> VafabMiljoData:
         try:
@@ -209,112 +184,106 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         except VafabMiljoError as err:
             raise UpdateFailed(f"Failed to fetch the pickup schedule: {err}") from err
 
-        if not self.client.session_cookie:
-            return VafabMiljoData(pickups=pickups, authenticated=False)
+        try:
+            # the app API without login: an auth error here says nothing about the Mina sidor login
+            settings = await self.client.get_settings()
+        except VafabMiljoError as err:
+            _LOGGER.warning("Failed to fetch settings: %s", err)
+            settings = None
+        if not isinstance(settings, dict):
+            settings = None
+
+        if self.minasidor is None:
+            if self.entry.data.get(CONF_SESSION_COOKIE):
+                # logged in with the app's BankID before 0.6.0: account data needs the Mina sidor login now
+                self._raise_login_issue()
+            return VafabMiljoData(pickups=pickups, authenticated=False, settings=settings)
 
         try:
             data = await self._async_fetch_account(pickups)
         except VafabMiljoAuthError:
             # The pickup calendar needs no login, so keep it going instead of failing the whole
-            # refresh (ConfigEntryAuthFailed would make every entity unavailable); ask HA for a new
-            # BankID login, raise a repair that links to the panel, and let the notifier tell the user.
-            self.entry.async_start_reauth(self.hass)
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                bankid_issue_id(self.entry.entry_id),
-                is_fixable=False,
-                severity=ir.IssueSeverity.ERROR,  # account data has already stopped updating
-                translation_key="bankid_expired",
-                translation_placeholders={"address": self.entry.title},
-                # the panel, where Settings -> Log in again fixes it; homeassistant:// navigates inside the
-                # current frontend (a plain path opens a new tab, an external browser in the companion app)
-                learn_more_url="homeassistant://vafabmiljo",
+            # refresh (ConfigEntryAuthFailed would make every entity unavailable); raise a repair
+            # that links to the panel, where the login is done, and let the notifier tell the user.
+            self._raise_login_issue()
+            ir.async_delete_issue(self.hass, DOMAIN, expiring_issue_id(self.entry.entry_id))
+            return VafabMiljoData(
+                pickups=pickups,
+                authenticated=True,
+                session_expired=True,
+                settings=settings,
+                login_expires=self.minasidor.refresh_expires,
             )
-            return VafabMiljoData(pickups=pickups, authenticated=True, session_expired=True)
         ir.async_delete_issue(self.hass, DOMAIN, bankid_issue_id(self.entry.entry_id))
-        self._persist_session_cookie()
+        self._check_login_expiry()
+        data.settings = settings
         return data
 
-    async def _async_fetch_account(self, pickups: list[dict[str, Any]]) -> VafabMiljoData:
+    @callback
+    def _raise_login_issue(self) -> None:
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            bankid_issue_id(self.entry.entry_id),
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,  # account data has already stopped updating
+            translation_key="bankid_expired",
+            translation_placeholders={"address": self.entry.title},
+            # the panel, where Settings -> Log in again fixes it; homeassistant:// navigates inside the
+            # current frontend (a plain path opens a new tab, an external browser in the companion app)
+            learn_more_url="homeassistant://vafabmiljo",
+        )
 
-        # The real app calls this periodically to extend the session. It does
-        # *not* fix a stuck 202 "waiting" endpoint (tested directly against
-        # the backend: still 202 twenty seconds after a successful call) -
-        # keep it only for its own documented purpose, not as a workaround.
-        try:
-            await self.client.keep_alive()
-        except VafabMiljoAuthError:
-            raise
-        except VafabMiljoError as err:
-            _LOGGER.warning("Failed to keep the BankID session alive: %s", err)
-
-        # Confirmed live: an account with invoices stuck returning 202
-        # "waiting" for hours started returning 200 immediately after one
-        # call to this endpoint. See VafabMiljoClient.get_customer for why -
-        # its own data is discarded here, only the side effect and the
-        # no_customer flag matter.
-        no_customer = False
-        try:
-            customer = await self.client.get_customer()
-        except VafabMiljoAuthError:
-            raise
-        except VafabMiljoError as err:
-            _LOGGER.warning("Failed to fetch customer record: %s", err)
-        else:
-            no_customer = isinstance(customer, dict) and customer.get("no_customer") is True
-
-        settings = await self._try_fetch("settings", self.client.get_settings)
-        if not isinstance(settings, dict):
-            settings = None
-
-        if no_customer:
-            # Seen live: the backend answers 200 {"no_customer": true, "message": "No customer data"} when
-            # its customer system returns nothing for the logged-in person - then /services/parameters
-            # answers 404 with the same message, /services/sanitation crashes with a 500 and
-            # properties/invoices are empty. Skip them and say so once, instead of a warning per refresh.
-            if not self._no_customer:
-                _LOGGER.warning(
-                    "VafabMiljö has no customer data for the BankID login of %s; invoices, fees and orders "
-                    "can't be fetched",
-                    self.entry.title,
-                )
-            self._no_customer = True
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                no_customer_issue_id(self.entry.entry_id),
-                is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
-                translation_key="no_customer",
-                translation_placeholders={"address": self.entry.title},
+    @callback
+    def _check_login_expiry(self) -> None:
+        """Warn (repair + event) when the 7-day Mina sidor login is about to run out."""
+        assert self.minasidor is not None
+        expires = self.minasidor.refresh_expires
+        issue_id = expiring_issue_id(self.entry.entry_id)
+        if expires - dt_util.utcnow().timestamp() > LOGIN_EXPIRY_WARNING_SECONDS:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        when = dt_util.as_local(dt_util.utc_from_timestamp(expires)).strftime("%Y-%m-%d %H:%M")
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="login_expiring",
+            translation_placeholders={"address": self.entry.title, "expires": when},
+            learn_more_url="homeassistant://vafabmiljo",
+        )
+        if not self._expiry_announced:
+            self._expiry_announced = True
+            self.hass.bus.async_fire(
+                EVENT_LOGIN_EXPIRING,
+                {"entry_id": self.entry.entry_id, "address": self.entry.title, "expires": when},
             )
-            return VafabMiljoData(pickups=pickups, authenticated=True, no_customer=True, settings=settings)
-        self._no_customer = False
-        ir.async_delete_issue(self.hass, DOMAIN, no_customer_issue_id(self.entry.entry_id))
 
-        invoices = await self._try_fetch("invoices", self.client.get_invoices)
-        sanitation = await self._try_fetch("sanitation", self.client.get_sanitation)
-        properties = await self._try_fetch("properties", self.client.get_properties)
-        parameters = await self._try_fetch("parameters", self.client.get_parameters)
-        orders = None
-        complaints = None
-        if parameters:
-            if parameters.get("ordersAvailable"):
-                orders = await self._try_fetch("orders", self.client.get_orders)
-            if parameters.get("complaintsAvailable"):
-                complaints = await self._try_fetch("complaints", self.client.get_complaints)
-
+    async def _async_fetch_account(self, pickups: list[dict[str, Any]]) -> VafabMiljoData:
+        ms = self.minasidor
+        assert ms is not None
+        invoices = await self._try_fetch("invoices", ms.get_invoices)
+        buildings = await self._try_fetch("buildings", ms.get_buildings)
+        billing = await self._try_fetch("billing info", ms.get_billing_info)
+        building = pick_building(buildings or [], self.entry.data.get(CONF_ADDRESS, ""))
+        services = orders = None
+        if building is not None:
+            building_id = str(building.get("id"))
+            services = await self._try_fetch("services", lambda: ms.get_services(building_id))
+            orders = await self._try_fetch("extra orders", lambda: ms.get_extra_orders(building_id))
         return VafabMiljoData(
             pickups=pickups,
             authenticated=True,
-            invoices=invoices,
-            sanitation=sanitation,
-            properties=properties,
-            parameters=parameters,
-            orders=orders,
-            complaints=complaints,
-            settings=settings,
+            invoices=invoices_payload(invoices) if invoices is not None else None,
+            sanitation=sanitation_payload(services) if services is not None else None,
+            properties=properties_payload(building, billing if isinstance(billing, dict) else None),
+            parameters={"ordersAvailable": bool(orders), "complaintsAvailable": False},
+            orders={str(building.get("id")): {"extra": [_order_item(o) for o in orders]}}
+            if building is not None and orders
+            else None,
+            login_expires=ms.refresh_expires,
         )
 
     @callback
@@ -323,7 +292,7 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         if self.data is not None and self.data.settings is not None:
             self.data.settings = {**self.data.settings, field: value}
 
-    async def _try_fetch(self, name: str, fetch: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any] | None:
+    async def _try_fetch(self, name: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
         """Fetch one piece of account data, tolerating a stuck/failing endpoint.
 
         Each of these is independent account data, not required for the
@@ -341,3 +310,21 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         except VafabMiljoError as err:
             _LOGGER.warning("Failed to fetch %s: %s", name, err)
             return None
+
+
+def _order_item(order: Any) -> dict[str, Any]:
+    """One extra-service order Mina sidor offers, with the "title" the orders sensor lists."""
+    if not isinstance(order, dict):
+        return {"title": str(order)}
+    # Seen live: {"feeText": "Budning kärl rest- och matavfall", "orderTypeText": "Restavfall",
+    # "serviceName": "RESTAVFALL", "pricePerUnit": 512, ...} - feeText is what the order is
+    title = (
+        order.get("feeText")
+        or order.get("name")
+        or order.get("title")
+        or order.get("description")
+        or order.get("serviceName")
+    )
+    if title and order.get("orderTypeText") and order["orderTypeText"].lower() not in str(title).lower():
+        title = f"{title} ({order['orderTypeText']})"
+    return {**order, "title": title}

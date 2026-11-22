@@ -1,8 +1,9 @@
-"""BankID login started from the panel (Settings), instead of only during setup or a reauth flow.
+"""The Mina sidor BankID login, started from the panel (Settings).
 
-One login at a time per entry, polled in the background; the panel asks for its status every
-couple of seconds to show the rotating QR. On success the new session cookie is saved to the
-entry and the entry reloads, which brings in the account entities (invoices, fees, ...).
+One login at a time per entry, polled in the background; the panel asks for its status every couple
+of seconds to show the animated QR and the "BankID on this device" link. On success the Mina sidor
+credentials are saved to the entry and the entry reloads, which brings in the account entities
+(invoices, fees, ...). See minasidor.py for the login itself.
 """
 
 from __future__ import annotations
@@ -11,27 +12,24 @@ import asyncio
 from typing import Any
 
 import voluptuous as vol
+from aiohttp import CookieJar
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .api import VafabMiljoClient, VafabMiljoError
-from .config_flow import (
-    bankid_autostart_desktop_url,
-    bankid_autostart_url,
-    bankid_failure_hint,
-    is_authenticated,
-    qr_data_uri,
-)
+from .api import VafabMiljoError
+from .config_flow import bankid_autostart_desktop_url, bankid_autostart_url
 from .const import (
     BANKID_POLL_INTERVAL,
     BANKID_POLL_TIMEOUT,
-    CONF_DEVICE_BEARER,
-    CONF_DEVICE_UUID,
+    CONF_MS_ACCESS,
+    CONF_MS_REFRESH,
+    CONF_MS_REFRESH_EXPIRES,
     CONF_SESSION_COOKIE,
     DOMAIN,
 )
-from .session import async_create_session
+from .minasidor import MinaSidorLogin, MinaSidorLoginError, qr_image
 
 KEY = f"{DOMAIN}_logins"
 
@@ -40,46 +38,46 @@ class PanelLogin:
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._hass = hass
         self._entry = entry
-        # a fresh client without the old cookie: the login must not ride on an expired session
-        self._client = VafabMiljoClient(
-            async_create_session(hass), entry.data[CONF_DEVICE_UUID], entry.data[CONF_DEVICE_BEARER]
-        )
+        # its own cookie jar: Criipto keeps the BankID order in cookies, and nothing else may share them
+        self._login = MinaSidorLogin(async_create_clientsession(hass, cookie_jar=CookieJar()))
         self.status = "waiting"  # waiting / done / failed
         self.hint: str | None = None
-        self.qr = ""
-        self.token: str | None = None
         self.task: asyncio.Task | None = None
 
     async def async_start(self) -> None:
-        auth = await self._client.start_bankid_auth()
-        self.qr, self.token = auth.get("qr") or "", auth.get("token")
-        self.task = self._hass.async_create_background_task(self._poll(), f"{DOMAIN} BankID login")
+        await self._login.start()
+        self.task = self._hass.async_create_background_task(self._poll(), f"{DOMAIN} Mina sidor login")
 
     async def _poll(self) -> None:
         deadline = asyncio.get_running_loop().time() + BANKID_POLL_TIMEOUT
         try:
             while asyncio.get_running_loop().time() < deadline:
                 await asyncio.sleep(BANKID_POLL_INTERVAL)
-                state = await self._client.poll_bankid_status()
-                if is_authenticated(state):
-                    self._hass.config_entries.async_update_entry(
-                        self._entry, data={**self._entry.data, CONF_SESSION_COOKIE: self._client.session_cookie}
-                    )
-                    # the entry's update listener reloads it; a pending reauth flow (started when the
-                    # session expired) is now answered, and finishing it later could overwrite this cookie
-                    self.status = "done"
-                    self._abort_reauth()
+                if await self._login.poll():
+                    self._save()
                     return
-                if hint := bankid_failure_hint(state):
-                    self.status, self.hint = "failed", hint
-                    return
-                if state.get("qr"):
-                    self.qr = state["qr"]
             self.status, self.hint = "failed", "timeout"
+        except MinaSidorLoginError as err:
+            self.status, self.hint = "failed", err.hint
         except VafabMiljoError as err:
             self.status, self.hint = "failed", str(err)
 
-    def _abort_reauth(self) -> None:
+    def _save(self) -> None:
+        creds = self._login.credentials
+        assert creds is not None
+        data = {
+            **self._entry.data,
+            CONF_MS_REFRESH: creds.refresh_cookie,
+            CONF_MS_REFRESH_EXPIRES: creds.refresh_expires,
+            CONF_MS_ACCESS: creds.access_token,
+        }
+        data.pop(CONF_SESSION_COOKIE, None)  # the app's own login is no longer used
+        # "done" first: the update listener's reload starts eagerly inside async_update_entry, and its
+        # unload drops a login that still says "waiting" - the panel then read "none" and showed a failure
+        self.status = "done"
+        # the entry's update listener reloads it with the new login
+        self._hass.config_entries.async_update_entry(self._entry, data=data)
+        # a pending reauth flow (started when the login ran out) is answered now
         flows = self._hass.config_entries.flow.async_progress_by_handler(
             DOMAIN, match_context={"source": "reauth", "entry_id": self._entry.entry_id}
         )
@@ -91,14 +89,16 @@ class PanelLogin:
             self.task.cancel()
 
     def as_dict(self) -> dict[str, Any]:
+        token = self._login.autostart_token
+        waiting = self.status == "waiting"
         return {
             "status": self.status,
             "hint": self.hint,
-            "qr": qr_data_uri(self.qr) if self.qr and self.status == "waiting" else None,
+            "qr": qr_image(self._login.qr) if self._login.qr and waiting else None,
             # open the BankID app on the same device: the panel uses the universal link on a phone or
             # tablet and the bankid:/// scheme on a computer
-            "autostart": bankid_autostart_url(self.token) if self.token else None,
-            "autostart_desktop": bankid_autostart_desktop_url(self.token) if self.token else None,
+            "autostart": bankid_autostart_url(token) if token and waiting else None,
+            "autostart_desktop": bankid_autostart_desktop_url(token) if token and waiting else None,
         }
 
 

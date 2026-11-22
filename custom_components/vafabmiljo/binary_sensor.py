@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -14,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
-from .const import CONF_ADDRESS, CONF_CITY, CONF_PLANT_ID, CONF_SESSION_COOKIE, DOMAIN
+from .const import CONF_ADDRESS, CONF_CITY, CONF_MS_REFRESH, CONF_PLANT_ID, CONF_SESSION_COOKIE, DOMAIN
 from .coordinator import VafabMiljoCoordinator
 
 
@@ -30,10 +31,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     coordinator: VafabMiljoCoordinator = entry.runtime_data
     entities: list[BinarySensorEntity] = []
 
-    # A session_cookie having ever been set means BankID was configured for this
-    # entry at some point - show connectivity even if the session has since
-    # expired (that's exactly what this entity is for).
-    if entry.data.get(CONF_SESSION_COOKIE):
+    # A login having ever been made (to Mina sidor, or with the app's BankID before 0.6.0) - show
+    # connectivity even if it has since run out (that's exactly what this entity is for).
+    if entry.data.get(CONF_MS_REFRESH) or entry.data.get(CONF_SESSION_COOKIE):
         entities.append(VafabMiljoConnectedBinarySensor(coordinator, entry))
 
     if coordinator.data.pickups:
@@ -59,6 +59,12 @@ class VafabMiljoConnectedBinarySensor(CoordinatorEntity[VafabMiljoCoordinator], 
     @property
     def is_on(self) -> bool:
         return self.coordinator.data.authenticated and not self.coordinator.data.session_expired
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        # when the 7-day Mina sidor login runs out, for the panel and for automations
+        expires = self.coordinator.data.login_expires
+        return {"login_expires": dt_util.utc_from_timestamp(expires).isoformat() if expires else None}
 
 
 class VafabMiljoPickupTomorrowBinarySensor(CoordinatorEntity[VafabMiljoCoordinator], BinarySensorEntity):

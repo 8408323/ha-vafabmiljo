@@ -201,6 +201,9 @@ class VafabMiljoPropertySensor(CoordinatorEntity[VafabMiljoCoordinator], SensorE
             "zip": current.get("zip"),
             "services": current.get("services"),
             "environment": current.get("environment"),
+            # from Mina sidor: whether the invoices are paid by autogiro, and the payment type code
+            "autogiro": current.get("autogiro"),
+            "payment_type": current.get("payment_type"),
         }
 
 

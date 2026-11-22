@@ -1,34 +1,15 @@
 """Config flow for the VafabMiljö integration.
 
-Setup has two parts: pick your address (works anonymously, no login), then
-optionally connect your account via BankID (QR shown in the HA UI) to also
-get invoices and contract data. BankID progress uses HA's async_show_progress
-with a real progress_task (required since HA Core 2024.8 - omitting it falls
-back to a deprecated polling workaround that, on a modern HA instance, does
-not reliably refresh the QR or ever re-enter the step once BankID confirms).
-
-The poll loop is a *single* long-running task for the whole wait, not one
-task per poll round - HA can re-invoke a progress step before its task is
-done (e.g. a frontend reload), and creating a fresh task each round trips
-https://github.com/home-assistant/core/issues/95749 (the flow advances
-prematurely, before the newest task ever gets a chance to finish). The
-trade-off: the QR shown to the user is a single snapshot and won't visually
-rotate during the wait, since HA has no supported way to update
-description_placeholders mid-task without re-triggering that same bug.
-
-The same progress step also links to BankID on the same device (a phone or
-tablet running the HA app or a browser): the autostart token from
-start_bankid_auth() goes into BankID's universal link. With redirect=null
-BankID doesn't open anything when it's done; the user switches back to HA
-and the poll task, which kept running meanwhile, finishes the step.
+Setup only picks your address (works anonymously, no login) - that's enough for the pickup
+schedule. The BankID login to Mina sidor, which adds invoices, fees and the property, is done in
+the VafabMiljö panel (Settings -> Account), where the animated BankID QR and the "BankID on this
+device" link can update live; a config-flow dialog can't refresh a QR, and BankID rejects a stale
+one. A reauth flow therefore only points to the panel.
 """
 
 from __future__ import annotations
 
-import asyncio
-import base64
 import logging
-import re
 import uuid
 from typing import Any
 from urllib.parse import quote
@@ -37,10 +18,8 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig
 
-from .api import VafabMiljoClient, VafabMiljoError, VafabMiljoTimeoutError
+from .api import VafabMiljoClient, VafabMiljoError
 from .const import (
-    BANKID_POLL_INTERVAL,
-    BANKID_POLL_TIMEOUT,
     CONF_ADDRESS,
     CONF_CITY,
     CONF_DEVICE_BEARER,
@@ -57,28 +36,6 @@ from .session import async_create_session
 _LOGGER = logging.getLogger(__name__)
 
 
-def qr_data_uri(svg: str) -> str:
-    # BankID's QR SVG draws only black modules with no background rect, which
-    # renders as transparent (showing HA's own theme through it, dark or
-    # light) unless we give it one ourselves. The SVG's viewBox has a negative
-    # origin (e.g. "-4 -4 49 49"), so the rect must match it exactly rather
-    # than a plain 0,0/100%/100% one - otherwise it leaves the top-left
-    # quiet zone uncovered while overshooting the bottom-right.
-    if "<svg" in svg and "<rect" not in svg:
-        match = re.search(r'viewBox="([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)"', svg)
-        if match:
-            x, y, width, height = match.groups()
-            rect = f'<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="#ffffff"/>'
-        else:
-            rect = '<rect width="100%" height="100%" fill="#ffffff"/>'
-        svg = svg.replace(">", f">{rect}", 1)
-    return f"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}"
-
-
-def _qr_markdown(svg: str) -> str:
-    return f"![BankID QR code]({qr_data_uri(svg)})"
-
-
 def bankid_autostart_url(token: str) -> str:
     """Open the BankID app on this phone/tablet (BankID's universal link, what their docs say to use on mobile).
 
@@ -91,24 +48,6 @@ def bankid_autostart_url(token: str) -> str:
 def bankid_autostart_desktop_url(token: str) -> str:
     """The same for BankID on a computer, which only answers to the bankid:/// scheme."""
     return f"bankid:///?autostarttoken={quote(token, safe='')}&redirect=null"
-
-
-def is_authenticated(status: dict[str, Any]) -> bool:
-    return status.get("status") == "authenticated successfully"
-
-
-def bankid_failure_hint(status: dict[str, Any]) -> str | None:
-    """BankID's own terminal-failure signal (QR expired unscanned, cancelled, etc.).
-
-    Distinct from our own outer poll timeout - this lets a dead QR get reported
-    back (and the "Connect with BankID" form re-shown to fetch a fresh one) in
-    the ~25-30s BankID itself takes, rather than waiting out the full
-    BANKID_POLL_TIMEOUT with no chance of succeeding.
-    """
-    status_obj = status.get("status", {})
-    if isinstance(status_obj, dict) and status_obj.get("message", {}).get("status") == "failed":
-        return status_obj["message"].get("hintCode", "failed")
-    return None
 
 
 class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -126,10 +65,6 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         self._client: VafabMiljoClient | None = None
         self._matches: list[dict[str, Any]] = []
         self._selected: dict[str, Any] = {}
-        self._qr_svg: str = ""
-        self._autostart_token: str | None = None
-        self._bankid_task: asyncio.Task[dict[str, Any]] | None = None
-        self._bankid_qr_expired: bool = False
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -162,94 +97,12 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             # different addresses/properties are meant to coexist as separate entries.
             await self.async_set_unique_id(self._selected["plant_id"])
             self._abort_if_unique_id_configured()
-            return await self.async_step_bankid_start()
+            assert self._client is not None
+            await self._client.set_address(self._selected["plant_id"])
+            return self._create_entry()
         options = [{"value": a["plant_id"], "label": f"{a['address']}, {a['city']}"} for a in self._matches]
         schema = vol.Schema({vol.Required(CONF_PLANT_ID): SelectSelector(SelectSelectorConfig(options=options))})
         return self.async_show_form(step_id="address", data_schema=schema)
-
-    async def async_step_bankid_start(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            assert self._client is not None
-            await self._client.set_address(self._selected["plant_id"])
-            if not user_input.get("enable_bankid", False):
-                return self._create_entry()
-            self._remember_bankid_order(await self._client.start_bankid_auth())
-            return await self.async_step_bankid_wait()
-        schema = vol.Schema({vol.Optional("enable_bankid", default=False): bool})
-        return self.async_show_form(step_id="bankid_start", data_schema=schema)
-
-    async def async_step_bankid_wait(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_bankid_wait(
-            step_id="bankid_wait",
-            failure_step_id="bankid_failed",
-            success_step_id="finish",
-            catch=VafabMiljoError,
-        )
-
-    async def _poll_bankid_until_done(self) -> dict[str, Any]:
-        """Poll status on a loop, sleeping between rounds, until authenticated or an error.
-
-        This has to be a *single* long-running task rather than one task per
-        poll: HA's flow manager can re-invoke a progress step before a task
-        completes (e.g. on a frontend reload), and creating a fresh task each
-        round trips a known core bug where the flow advances prematurely
-        without ever waiting for the newest task
-        (https://github.com/home-assistant/core/issues/95749).
-        """
-        assert self._client is not None
-        deadline = asyncio.get_event_loop().time() + BANKID_POLL_TIMEOUT
-        while True:
-            await asyncio.sleep(BANKID_POLL_INTERVAL)
-            status = await self._client.poll_bankid_status()
-            if is_authenticated(status):
-                return status
-            if hint := bankid_failure_hint(status):
-                self._bankid_qr_expired = True
-                raise VafabMiljoTimeoutError(f"BankID reported: {hint}")
-            if status.get("qr"):
-                self._qr_svg = status["qr"]
-            if asyncio.get_event_loop().time() >= deadline:
-                raise VafabMiljoTimeoutError("BankID login was never confirmed")
-
-    def _remember_bankid_order(self, auth: dict[str, Any]) -> None:
-        self._qr_svg = auth.get("qr") or ""
-        self._autostart_token = auth.get("token") or None
-
-    async def _async_bankid_wait(
-        self, *, step_id: str, failure_step_id: str, success_step_id: str, catch: type[Exception]
-    ) -> ConfigFlowResult:
-        if self._bankid_task is None:
-            self._bankid_task = self.hass.async_create_task(self._poll_bankid_until_done())
-        if not self._bankid_task.done():
-            placeholders = {"qr_code": _qr_markdown(self._qr_svg)}
-            if self._autostart_token:
-                # the link text is translated; only the URL is a placeholder (hassfest wants no URLs in strings)
-                placeholders["autostart_url"] = bankid_autostart_url(self._autostart_token)
-            return self.async_show_progress(
-                step_id=step_id,
-                # without a token there's nothing to open on this device: QR only
-                progress_action="waiting_for_bankid" if self._autostart_token else "waiting_for_bankid_qr",
-                description_placeholders=placeholders,
-                progress_task=self._bankid_task,
-            )
-        task, self._bankid_task = self._bankid_task, None
-        try:
-            task.result()  # only raises on failure/timeout - success is implicit
-        except catch:
-            return self.async_show_progress_done(next_step_id=failure_step_id)
-        return self.async_show_progress_done(next_step_id=success_step_id)
-
-    async def async_step_bankid_failed(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        error = "qr_expired" if self._bankid_qr_expired else "cannot_connect"
-        self._bankid_qr_expired = False
-        return self.async_show_form(
-            step_id="bankid_start",
-            data_schema=vol.Schema({vol.Optional("enable_bankid", default=True): bool}),
-            errors={"base": error},
-        )
-
-    async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return self._create_entry()
 
     def _create_entry(self) -> ConfigFlowResult:
         assert self._client is not None
@@ -258,52 +111,21 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
             data={
                 CONF_DEVICE_UUID: self._device_uuid,
                 CONF_DEVICE_BEARER: self._device_bearer,
-                CONF_SESSION_COOKIE: self._client.session_cookie,
                 CONF_ADDRESS: self._selected["address"],
                 CONF_CITY: self._selected["city"],
                 CONF_PLANT_ID: self._selected["plant_id"],
             },
         )
 
-    # -- Reauth: the BankID session (vafab_session cookie) expired ------------
+    # -- Reauth: the Mina sidor login ran out - it is renewed in the panel -----
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        entry = self._get_reauth_entry()
-        if self._client is None:
-            session = async_create_session(self.hass)
-            self._client = VafabMiljoClient(
-                session,
-                entry.data[CONF_DEVICE_UUID],
-                entry.data[CONF_DEVICE_BEARER],
-            )
         if user_input is not None:
-            self._remember_bankid_order(await self._client.start_bankid_auth())
-            return await self.async_step_reauth_bankid_wait()
-        errors = {}
-        if self._bankid_qr_expired:
-            errors["base"] = "qr_expired"
-            self._bankid_qr_expired = False
-        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({}), errors=errors)
-
-    async def async_step_reauth_bankid_wait(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_bankid_wait(
-            step_id="reauth_bankid_wait",
-            failure_step_id="reauth_confirm",
-            success_step_id="reauth_finish",
-            catch=VafabMiljoError,
-        )
-
-    async def async_step_reauth_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        assert self._client is not None
-        entry = self._get_reauth_entry()
-        return self.async_update_reload_and_abort(
-            entry,
-            data_updates={CONF_SESSION_COOKIE: self._client.session_cookie},
-            reason="reauth_successful",
-        )
+            return self.async_abort(reason="reauth_use_panel")
+        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({}))
 
     # -- Reconfigure: change the bound address without removing the entry -----
 

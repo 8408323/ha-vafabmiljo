@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,175 +10,266 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from vafabmiljo.api import VafabMiljoAuthError, VafabMiljoError
-from vafabmiljo.coordinator import VafabMiljoCoordinator, VafabMiljoData
+from vafabmiljo.const import EVENT_LOGIN_EXPIRING
+from vafabmiljo.coordinator import VafabMiljoCoordinator, VafabMiljoData, _order_item
+
+_BANKID_ISSUE = ("vafabmiljo", "bankid_expired_test_entry")
+_EXPIRING_ISSUE = ("vafabmiljo", "login_expiring_test_entry")
+
+_INVOICES = [
+    {
+        "archived": True,
+        "invoiceDate": "2026-08-01T00:00:00",
+        "invoiceExpirationDate": "2026-08-31T00:00:00",
+        "invoiceNr": 4382143,
+        "ocrNr": "111",
+        "paymentStatus": "Helt betald",
+        "renmainingAmount": 826.0,
+    },
+    {
+        "archived": True,
+        "invoiceDate": "2026-11-01T00:00:00",
+        "invoiceExpirationDate": "2026-12-01T00:00:00",
+        "invoiceNr": 4476065,
+        "ocrNr": "222",
+        "paymentStatus": "Obetald",
+        "renmainingAmount": 826.0,
+    },
+]
+_BUILDINGS = [
+    {"id": "1", "address": "Annangatan 9", "designation": "Annan 1:1", "zipcode": "11111", "city": "Teststad"},
+    {"id": "985520", "address": "Testgatan 1", "designation": "Test 2:7", "zipcode": "12345", "city": "Teststad"},
+]
+_SERVICES = [
+    {
+        "id": 435588,
+        "name": "Grundavgift",
+        "description": "Fast grundavgift, småhus",
+        "serviceType": "RH Service",
+        "cost": 1916.62,
+        "hide": False,
+        "hidePrice": False,
+    }
+]
+_BILLING = {"autogiroStatus": True, "buildingBillingInfo": [{"buildingId": "985520", "paymentType": "AGBG"}]}
 
 
-def _make_coordinator(client) -> VafabMiljoCoordinator:
-    hass = HomeAssistant()
-    entry = ConfigEntry(data={})
-    return VafabMiljoCoordinator(hass, entry, client)
-
-
-def _authenticated_client(**overrides) -> AsyncMock:
+def _app_client() -> AsyncMock:
     client = AsyncMock()
-    client.session_cookie = "abc123"
     client.list_next_pickup.return_value = []
-    client.get_invoices.return_value = {"data": []}
-    client.get_sanitation.return_value = {"contracts": []}
-    client.get_properties.return_value = {"current": {"id": 1}}
-    client.get_parameters.return_value = {"ordersAvailable": False, "complaintsAvailable": False}
-    for key, value in overrides.items():
-        setattr(client, key, value)
+    client.get_settings.return_value = {"garbage": True}
     return client
 
 
-async def test_unauthenticated_skips_account_endpoints():
-    client = AsyncMock()
-    client.session_cookie = None
-    client.list_next_pickup.return_value = [{"address": "Testgatan 1", "bins": []}]
+def _minasidor(*, expires_in: float = 7 * 24 * 3600, **overrides) -> AsyncMock:
+    ms = AsyncMock()
+    ms.refresh_expires = time.time() + expires_in
+    ms.get_invoices.return_value = _INVOICES
+    ms.get_buildings.return_value = _BUILDINGS
+    ms.get_services.return_value = _SERVICES
+    ms.get_billing_info.return_value = _BILLING
+    ms.get_extra_orders.return_value = []
+    for key, value in overrides.items():
+        setattr(ms, key, value)
+    return ms
 
-    data = await _make_coordinator(client)._async_update_data()
+
+def _make_coordinator(client=None, minasidor=None, data=None) -> VafabMiljoCoordinator:
+    hass = HomeAssistant()
+    entry = ConfigEntry(data=data if data is not None else {"address": "Testgatan 1"})
+    return VafabMiljoCoordinator(hass, entry, client or _app_client(), minasidor)
+
+
+# -- Without a Mina sidor login ----------------------------------------------------------------------
+
+
+async def test_unauthenticated_fetches_pickups_and_settings_only():
+    client = _app_client()
+    client.list_next_pickup.return_value = [{"address": "Testgatan 1", "bins": []}]
+    coordinator = _make_coordinator(client)
+
+    data = await coordinator._async_update_data()
 
     assert data.authenticated is False
+    assert data.pickups == [{"address": "Testgatan 1", "bins": []}]
+    assert data.settings == {"garbage": True}
     assert data.invoices is None
-    assert data.sanitation is None
-    client.get_invoices.assert_not_called()
+    assert coordinator.hass.data.get("_issues", {}) == {}
 
 
-async def test_authenticated_fetches_account_data():
-    client = _authenticated_client(
-        get_invoices=AsyncMock(return_value={"data": [{"item": {"amount": 500}}]}),
-    )
+async def test_an_old_app_login_asks_for_the_mina_sidor_login():
+    coordinator = _make_coordinator(data={"address": "Testgatan 1", "session_cookie": "old"})
 
-    data = await _make_coordinator(client)._async_update_data()
-
-    assert data.authenticated is True
-    assert data.invoices == {"data": [{"item": {"amount": 500}}]}
-    assert data.sanitation == {"contracts": []}
-    assert data.properties == {"current": {"id": 1}}
-    client.get_orders.assert_not_called()
-    client.get_complaints.assert_not_called()
-
-
-async def test_orders_and_complaints_fetched_only_when_available():
-    client = _authenticated_client(
-        get_parameters=AsyncMock(return_value={"ordersAvailable": True, "complaintsAvailable": True}),
-        get_orders=AsyncMock(return_value={"1": {"10": [{"id": 719, "title": "Budning"}]}}),
-        get_complaints=AsyncMock(return_value={"1": {"10": [{"description": "Utebliven hämtning"}]}}),
-    )
-
-    data = await _make_coordinator(client)._async_update_data()
-
-    assert data.available_orders == [{"id": 719, "title": "Budning"}]
-    assert data.available_complaints == [{"description": "Utebliven hämtning"}]
-
-
-async def _assert_expired_keeps_pickups(client):
-    client.list_next_pickup.return_value = [{"bins": [{"type": "Restavfall", "pickup_date": "2026-10-19"}]}]
-    coordinator = _make_coordinator(client)
     data = await coordinator._async_update_data()
-    # the pickup calendar keeps working; HA is asked for a new BankID login
-    assert data.pickups and data.authenticated and data.session_expired
-    assert data.invoices is None
-    assert coordinator.entry.reauth_started == 1
-    # a repair in Settings -> Repairs, linking to the panel
-    issue = coordinator.hass.data["_issues"][("vafabmiljo", "bankid_expired_test_entry")]
-    assert issue["learn_more_url"] == "homeassistant://vafabmiljo"
+
+    assert data.authenticated is False
+    issue = coordinator.hass.data["_issues"][_BANKID_ISSUE]
     assert issue["severity"] == "error"
+    assert issue["learn_more_url"] == "homeassistant://vafabmiljo"
     assert issue["translation_placeholders"] == {"address": "Testgatan 1, Teststad"}
 
 
-async def test_expired_session_triggers_reauth():
-    client = AsyncMock()
-    client.session_cookie = "abc123"
-    client.get_invoices.side_effect = VafabMiljoAuthError("expired")
-    await _assert_expired_keeps_pickups(client)
-
-
-async def test_keep_alive_called_before_account_data(caplog):
-    # Matches the real app's own behavior of extending the session
-    # periodically - not a workaround for anything (see coordinator.py).
-    client = _authenticated_client()
-
-    await _make_coordinator(client)._async_update_data()
-
-    client.keep_alive.assert_awaited_once()
-
-
-async def test_keep_alive_failure_is_tolerated(caplog):
-    client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoError("boom")))
-
-    data = await _make_coordinator(client)._async_update_data()
-
-    assert data.authenticated is True
-    assert "Failed to keep the BankID session alive: boom" in caplog.text
-
-
-async def test_keep_alive_auth_error_triggers_reauth():
-    client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
-    await _assert_expired_keeps_pickups(client)
-
-
-async def test_get_customer_called_before_account_data(caplog):
-    # Confirmed live: fixes a real account whose invoices stayed 202
-    # "waiting" for hours (see api.py's VafabMiljoClient.get_customer).
-    client = _authenticated_client()
-
-    await _make_coordinator(client)._async_update_data()
-
-    client.get_customer.assert_awaited_once()
-
-
-async def test_get_customer_failure_is_tolerated(caplog):
-    client = _authenticated_client(get_customer=AsyncMock(side_effect=VafabMiljoError("boom")))
-
-    data = await _make_coordinator(client)._async_update_data()
-
-    assert data.authenticated is True
-    assert "Failed to fetch customer record: boom" in caplog.text
-
-
-async def test_get_customer_auth_error_triggers_reauth():
-    client = _authenticated_client(get_customer=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
-    await _assert_expired_keeps_pickups(client)
-
-
-async def test_authenticated_account_fetch_failure_is_tolerated(caplog):
-    # invoices/sanitation/properties/orders/complaints are independent - one
-    # endpoint stuck or failing (e.g. an account whose /services/invoices
-    # never leaves the backend's 202 "waiting" state) shouldn't take down the
-    # pickup-schedule sensors, which don't need any of this account data.
-    client = _authenticated_client()
-    client.get_invoices.side_effect = VafabMiljoError("boom")
-
-    data = await _make_coordinator(client)._async_update_data()
-
-    assert data.authenticated is True
-    assert data.invoices is None
-    assert data.sanitation == {"contracts": []}
-    assert "Failed to fetch invoices: boom" in caplog.text
-
-
-async def test_orders_fetch_failure_is_tolerated(caplog):
-    client = _authenticated_client(
-        get_parameters=AsyncMock(return_value={"ordersAvailable": True, "complaintsAvailable": False}),
-        get_orders=AsyncMock(side_effect=VafabMiljoError("boom")),
-    )
-
-    data = await _make_coordinator(client)._async_update_data()
-
-    assert data.authenticated is True
-    assert data.orders is None
-    assert "Failed to fetch orders: boom" in caplog.text
-
-
 async def test_pickup_fetch_failure_raises_update_failed():
-    client = AsyncMock()
-    client.session_cookie = None
+    client = _app_client()
     client.list_next_pickup.side_effect = VafabMiljoError("boom")
 
     with pytest.raises(UpdateFailed):
         await _make_coordinator(client)._async_update_data()
+
+
+async def test_failing_or_odd_settings_are_ignored(caplog):
+    client = _app_client()
+    client.get_settings.side_effect = VafabMiljoError("boom")
+    assert (await _make_coordinator(client)._async_update_data()).settings is None
+    assert "Failed to fetch settings" in caplog.text
+
+    client.get_settings.side_effect = None
+    client.get_settings.return_value = ["not", "a", "dict"]
+    assert (await _make_coordinator(client)._async_update_data()).settings is None
+
+
+async def test_a_settings_auth_error_does_not_break_the_refresh():
+    # the app API is used without login; its auth errors say nothing about the Mina sidor login
+    client = _app_client()
+    client.get_settings.side_effect = VafabMiljoAuthError("no")
+    coordinator = _make_coordinator(client, _minasidor())
+
+    data = await coordinator._async_update_data()
+
+    assert data.settings is None
+    assert data.session_expired is False
+
+
+# -- With a Mina sidor login -------------------------------------------------------------------------
+
+
+async def test_account_data_comes_from_mina_sidor():
+    ms = _minasidor(get_extra_orders=AsyncMock(return_value=[{"name": "Extra tömning", "id": 7}]))
+    coordinator = _make_coordinator(minasidor=ms)
+
+    data = await coordinator._async_update_data()
+
+    assert data.authenticated is True
+    assert data.session_expired is False
+    assert data.settings == {"garbage": True}
+    assert data.login_expires == ms.refresh_expires
+    # newest invoice first, in the app's shape
+    assert [i["id"] for i in data.invoice_items] == [4476065, 4382143]
+    assert data.invoice_items[0]["paymentStatus"] == "Obetald"
+    assert data.invoice_items[0]["amount"] == 826.0
+    # the building at the entry's address, not the first one
+    ms.get_services.assert_awaited_once_with("985520")
+    ms.get_extra_orders.assert_awaited_once_with("985520")
+    current = data.properties["current"]
+    assert current["designation"] == "Test 2:7"
+    assert current["autogiro"] is True
+    assert current["payment_type"] == "AGBG"
+    assert data.sanitation["contracts"][0]["fee"] == {"price": 1916.62, "unit": "kr/år"}
+    assert data.parameters == {"ordersAvailable": True, "complaintsAvailable": False}
+    assert data.available_orders == [{"name": "Extra tömning", "id": 7, "title": "Extra tömning"}]
+
+
+async def test_no_orders_and_no_building():
+    ms = _minasidor(get_buildings=AsyncMock(return_value=[]))
+    data = await _make_coordinator(minasidor=ms)._async_update_data()
+
+    ms.get_services.assert_not_called()
+    ms.get_extra_orders.assert_not_called()
+    assert data.properties is None
+    assert data.sanitation is None
+    assert data.orders is None
+    assert data.parameters == {"ordersAvailable": False, "complaintsAvailable": False}
+
+
+async def test_each_failing_endpoint_is_tolerated(caplog):
+    boom = AsyncMock(side_effect=VafabMiljoError("boom"))
+    ms = _minasidor(get_invoices=boom, get_buildings=boom, get_billing_info=AsyncMock(side_effect=VafabMiljoError("x")))
+    data = await _make_coordinator(minasidor=ms)._async_update_data()
+
+    assert data.authenticated is True
+    assert data.invoices is None
+    assert data.properties is None
+    for name in ("invoices", "buildings", "billing info"):
+        assert f"Failed to fetch {name}" in caplog.text
+
+
+async def test_failing_services_and_orders_are_tolerated(caplog):
+    ms = _minasidor(
+        get_services=AsyncMock(side_effect=VafabMiljoError("boom")),
+        get_extra_orders=AsyncMock(side_effect=VafabMiljoError("boom")),
+        get_billing_info=AsyncMock(return_value=["odd"]),
+    )
+    data = await _make_coordinator(minasidor=ms)._async_update_data()
+
+    assert data.sanitation is None
+    assert data.orders is None
+    assert data.properties["current"]["autogiro"] is None
+    assert "Failed to fetch services" in caplog.text
+    assert "Failed to fetch extra orders" in caplog.text
+
+
+async def test_an_expired_login_keeps_pickups_and_raises_a_repair():
+    client = _app_client()
+    client.list_next_pickup.return_value = [{"bins": [{"type": "Restavfall", "pickup_date": "2026-10-19"}]}]
+    ms = _minasidor(get_invoices=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
+    coordinator = _make_coordinator(client, ms)
+    coordinator.hass.data["_issues"] = {_EXPIRING_ISSUE: {}}
+
+    data = await coordinator._async_update_data()
+
+    assert data.pickups and data.authenticated and data.session_expired
+    assert data.invoices is None
+    assert data.settings == {"garbage": True}
+    assert data.login_expires == ms.refresh_expires
+    issue = coordinator.hass.data["_issues"][_BANKID_ISSUE]
+    assert issue["learn_more_url"] == "homeassistant://vafabmiljo"
+    assert issue["severity"] == "error"
+    assert _EXPIRING_ISSUE not in coordinator.hass.data["_issues"]
+
+
+async def test_a_working_login_clears_the_repair():
+    coordinator = _make_coordinator(minasidor=_minasidor())
+    coordinator.hass.data["_issues"] = {_BANKID_ISSUE: {}}
+    await coordinator._async_update_data()
+    assert coordinator.hass.data["_issues"] == {}
+
+
+async def test_a_login_with_days_left_has_no_expiry_warning():
+    coordinator = _make_coordinator(minasidor=_minasidor(expires_in=3 * 24 * 3600))
+    coordinator.hass.data["_issues"] = {_EXPIRING_ISSUE: {}}
+
+    await coordinator._async_update_data()
+
+    assert _EXPIRING_ISSUE not in coordinator.hass.data["_issues"]
+    assert coordinator.hass.bus.fired == []
+
+
+async def test_a_login_about_to_run_out_warns_once():
+    ms = _minasidor(expires_in=24 * 3600)
+    coordinator = _make_coordinator(minasidor=ms)
+
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+
+    issue = coordinator.hass.data["_issues"][_EXPIRING_ISSUE]
+    assert issue["severity"] == "warning"
+    assert issue["translation_key"] == "login_expiring"
+    assert issue["translation_placeholders"]["address"] == "Testgatan 1, Teststad"
+    assert issue["translation_placeholders"]["expires"]
+    events = [e for e in coordinator.hass.bus.fired if e[0] == EVENT_LOGIN_EXPIRING]
+    assert len(events) == 1
+    assert events[0][1]["entry_id"] == "test_entry"
+    assert events[0][1]["expires"] == issue["translation_placeholders"]["expires"]
+
+
+def test_order_item():
+    assert _order_item({"title": "Extra"}) == {"title": "Extra"}
+    assert _order_item({"description": "Grovavfall"})["title"] == "Grovavfall"
+    assert _order_item({"serviceName": "Kärltvätt"})["title"] == "Kärltvätt"
+    assert _order_item("Budning") == {"title": "Budning"}
+
+
+# -- Data helpers ------------------------------------------------------------------------------------
 
 
 def test_available_orders_and_complaints_empty_without_properties():
@@ -203,187 +295,23 @@ def test_as_invoice_id_rejects_malformed_values_without_raising():
     assert _as_invoice_id(" 5 ") == 5
     # str.isdigit() is true for both, int() refuses the first and silently
     # normalises the second; plain ASCII decimals only, so both are rejected.
-    assert _as_invoice_id("\u00b2") is None
-    assert _as_invoice_id("\uff15") is None
+    assert _as_invoice_id("²") is None
+    assert _as_invoice_id("５") is None
     assert _as_invoice_id(True) is None
     assert _as_invoice_id(None) is None
     assert _as_invoice_id([]) is None
     assert _as_invoice_id("12a") is None
     # int() would read these as 10; a junk row must not shadow the real id 10.
     assert _as_invoice_id("1_0") is None
-    assert _as_invoice_id("\uff11\uff10") is None
+    assert _as_invoice_id("１０") is None
     assert _as_invoice_id("-5") == -5
     # Past sys.int_max_str_digits int() raises; a corrupt stored id must not
     # abort entry setup.
     assert _as_invoice_id("1" * 5000) is None
 
 
-async def test_a_working_login_clears_the_repair():
-    client = _authenticated_client()
-    coordinator = _make_coordinator(client)
-    coordinator.hass.data["_issues"] = {("vafabmiljo", "bankid_expired_test_entry"): {}}
-    await coordinator._async_update_data()
-    assert coordinator.hass.data["_issues"] == {}
-
-
-def _keep_alive_coordinator(client, *, cookie_in_entry="abc123", expired=False) -> VafabMiljoCoordinator:
-    hass = HomeAssistant()
-    entry = ConfigEntry(data={"session_cookie": cookie_in_entry})
-    coordinator = VafabMiljoCoordinator(hass, entry, client)
-    coordinator.data = VafabMiljoData(pickups=[], authenticated=True, session_expired=expired)
-    return coordinator
-
-
-async def test_keep_alive_tick_pings_the_backend():
-    client = _authenticated_client()
-    coordinator = _keep_alive_coordinator(client)
-
-    await coordinator._async_keep_alive()
-
-    client.keep_alive.assert_awaited_once()
-    assert coordinator.hass.config_entries.updates == []  # cookie unchanged: nothing saved
-
-
-async def test_keep_alive_tick_saves_a_rotated_cookie():
-    client = _authenticated_client()
-    coordinator = _keep_alive_coordinator(client)
-
-    async def _rotate():
-        client.session_cookie = "rotated"
-
-    client.keep_alive = AsyncMock(side_effect=_rotate)
-    await coordinator._async_keep_alive()
-
-    assert coordinator.entry.data["session_cookie"] == "rotated"
-    assert coordinator.is_own_entry_update(coordinator.entry)
-
-
-async def test_keep_alive_tick_leaves_a_cookie_from_a_new_login_alone():
-    client = _authenticated_client()
-    coordinator = _keep_alive_coordinator(client)
-    coordinator.entry.data = {"session_cookie": "from-panel-login"}  # saved meanwhile; a reload follows
-    client.session_cookie = "rotated-old-session"
-
-    await coordinator._async_keep_alive()
-
-    assert coordinator.entry.data["session_cookie"] == "from-panel-login"
-    assert not coordinator.is_own_entry_update(coordinator.entry)
-
-
-async def test_keep_alive_tick_skips_an_expired_or_missing_session():
-    client = _authenticated_client()
-    await _keep_alive_coordinator(client, expired=True)._async_keep_alive()
-    client.session_cookie = None
-    await _keep_alive_coordinator(client)._async_keep_alive()
-
-    client.keep_alive.assert_not_awaited()
-
-
-async def test_keep_alive_tick_rejected_runs_the_expiry_handling():
-    client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoAuthError("expired")))
-    coordinator = _keep_alive_coordinator(client)
-
-    await coordinator._async_keep_alive()
-
-    # the refresh it triggered marked the session expired and asked for a new login
-    assert coordinator.data.session_expired is True
-    assert coordinator.entry.reauth_started == 1
-
-
-async def test_keep_alive_tick_tolerates_a_network_error():
-    client = _authenticated_client(keep_alive=AsyncMock(side_effect=VafabMiljoError("boom")))
-    coordinator = _keep_alive_coordinator(client)
-
-    await coordinator._async_keep_alive()
-
-    assert coordinator.data.session_expired is False
-
-
-async def test_refresh_saves_a_rotated_cookie():
-    client = _authenticated_client()
-    coordinator = _keep_alive_coordinator(client, cookie_in_entry="old")
-
-    await coordinator._async_update_data()
-
-    assert coordinator.entry.data["session_cookie"] == "abc123"
-
-
-# -- No customer record for the logged-in person -----------------------------------------------------
-
-_NO_CUSTOMER = {"status": "error", "code": "api_error", "message": "No customer data", "no_customer": True}
-
-
-async def test_no_customer_skips_account_endpoints_and_raises_a_repair(caplog):
-    # seen live: /services/customer answers 200 with no_customer, parameters then 404s and sanitation 500s
-    client = _authenticated_client(get_customer=AsyncMock(return_value=_NO_CUSTOMER))
-    client.get_settings.return_value = {"garbage": True}
-    coordinator = _make_coordinator(client)
-
-    data = await coordinator._async_update_data()
-
-    assert data.authenticated is True
-    assert data.no_customer is True
-    assert data.session_expired is False
-    assert data.settings == {"garbage": True}
-    assert data.invoices is None
-    for skipped in (client.get_invoices, client.get_sanitation, client.get_properties, client.get_parameters):
-        skipped.assert_not_called()
-    issue = coordinator.hass.data["_issues"][("vafabmiljo", "no_customer_test_entry")]
-    assert issue["severity"] == "warning"
-    assert issue["translation_key"] == "no_customer"
-    assert issue["translation_placeholders"] == {"address": "Testgatan 1, Teststad"}
-    assert "no customer data" in caplog.text
-
-
-async def test_no_customer_is_logged_once_not_every_refresh(caplog):
-    client = _authenticated_client(get_customer=AsyncMock(return_value=_NO_CUSTOMER))
-    coordinator = _make_coordinator(client)
-
-    await coordinator._async_update_data()
-    await coordinator._async_update_data()
-
-    assert caplog.text.count("no customer data") == 1
-
-
-async def test_customer_data_coming_back_clears_the_no_customer_repair(caplog):
-    client = _authenticated_client(get_customer=AsyncMock(return_value=_NO_CUSTOMER))
-    coordinator = _make_coordinator(client)
-    await coordinator._async_update_data()
-
-    client.get_customer = AsyncMock(return_value={"status": "ok"})
-    data = await coordinator._async_update_data()
-
-    assert data.no_customer is False
-    assert ("vafabmiljo", "no_customer_test_entry") not in coordinator.hass.data["_issues"]
-    client.get_invoices.assert_awaited()
-
-    # and if it disappears again, that is logged again
-    client.get_customer = AsyncMock(return_value=_NO_CUSTOMER)
-    await coordinator._async_update_data()
-    assert caplog.text.count("no customer data") == 2
-
-
-async def test_settings_are_fetched_with_the_account_data():
-    client = _authenticated_client()
-    client.get_settings.return_value = {"garbage": False, "time": "07:30"}
-
-    data = await _make_coordinator(client)._async_update_data()
-
-    assert data.settings == {"garbage": False, "time": "07:30"}
-
-
-async def test_failing_or_odd_settings_are_ignored(caplog):
-    client = _authenticated_client()
-    client.get_settings.side_effect = VafabMiljoError("boom")
-    assert (await _make_coordinator(client)._async_update_data()).settings is None
-
-    client.get_settings.side_effect = None
-    client.get_settings.return_value = ["not", "a", "dict"]
-    assert (await _make_coordinator(client)._async_update_data()).settings is None
-
-
 async def test_apply_setting_updates_the_fetched_settings():
-    client = _authenticated_client()
+    client = _app_client()
     client.get_settings.return_value = {"garbage": True, "news": True}
     coordinator = _make_coordinator(client)
     coordinator.data = await coordinator._async_update_data()
@@ -394,9 +322,20 @@ async def test_apply_setting_updates_the_fetched_settings():
 
 
 async def test_apply_setting_without_fetched_settings_is_a_no_op():
-    coordinator = _make_coordinator(_authenticated_client())
+    coordinator = _make_coordinator()
     coordinator.data = None
     coordinator.async_apply_setting("garbage", False)  # before the first refresh
     coordinator.data = VafabMiljoData(settings=None)
     coordinator.async_apply_setting("garbage", False)
     assert coordinator.data.settings is None
+
+
+def test_order_title_is_the_fee_text_with_the_waste_type():
+    from vafabmiljo.coordinator import _order_item
+
+    order = {"feeText": "Budning kärl", "orderTypeText": "Restavfall", "serviceName": "RESTAVFALL", "pricePerUnit": 512}
+    assert _order_item(order)["title"] == "Budning kärl (Restavfall)"
+    # the type already in the text is not repeated
+    assert _order_item({"feeText": "Extra tömning restavfall", "orderTypeText": "Restavfall"})["title"] == (
+        "Extra tömning restavfall"
+    )

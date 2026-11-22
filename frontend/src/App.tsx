@@ -13,6 +13,7 @@ type Addr = {
 type Ctx = { hass: any; t: T; locale: string };
 
 const TABS = ["overview", "invoices", "settings"] as const;
+type Theme = "auto" | "light" | "dark";
 type Tab = (typeof TABS)[number];
 const PAID = new Set(["helt betald"]);  // same as const.PAID_STATUSES
 
@@ -25,6 +26,33 @@ let haTz: string | undefined;
 const todayIso = () => new Date().toLocaleDateString("sv-SE", { timeZone: haTz });  // sv-SE formats as YYYY-MM-DD
 const utc = (iso: string) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
 const daysUntil = (iso: string) => Math.round((utc(iso) - utc(todayIso())) / 864e5);
+const isPaid = (i: Invoice) => PAID.has(String(i.payment_status ?? "").trim().toLowerCase());
+
+// "förfaller om 3 dagar" / "förföll 1 nov." for an unpaid invoice, the invoice date for a paid one
+function dueText(i: Invoice, t: T, locale: string) {
+  if (!i.due_date) return "";
+  const n = daysUntil(i.due_date);
+  if (isPaid(i) || n < 0) return isPaid(i) ? day(i.due_date).toLocaleDateString(locale) : t.due_was.replace("{date}", day(i.due_date).toLocaleDateString(locale, { day: "numeric", month: "short" }));
+  return n === 0 ? t.due_today : n === 1 ? t.due_tomorrow : t.due_in.replace("{n}", String(n));
+}
+
+// The Mina sidor login lasts 7 days and can't be extended; the "BankID connected" sensor carries when it runs out.
+type LoginState = "none" | "ok" | "expiring" | "expired" | "unknown";
+type LoginInfo = { state: LoginState; days: number | null; until: string };
+function loginInfo(a: Addr | undefined, locale: string): LoginInfo {
+  const s = a?.bankid;
+  if (!s) return { state: "none", days: null, until: "" };
+  if (s.state === "off") return { state: "expired", days: null, until: "" };
+  if (s.state !== "on") return { state: "unknown", days: null, until: "" };
+  const iso: string | undefined = s.attributes.login_expires;
+  if (!iso) return { state: "ok", days: null, until: "" };
+  const at = new Date(iso);
+  const days = Math.max(0, Math.floor((at.getTime() - Date.now()) / 864e5));
+  const until = at.toLocaleString(locale, { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return { state: days < 2 ? "expiring" : "ok", days, until };
+}
+const leftText = (li: LoginInfo, t: T) =>
+  li.days == null ? t.bankid_ok : li.days === 0 ? t.login_left_0 : li.days === 1 ? t.login_left_1 : t.login_left.replace("{n}", String(li.days));
 
 type Entry = { entry_id: string; title: string; state: string };
 
@@ -74,6 +102,28 @@ function when(iso: string | undefined, { t, locale }: Ctx) {
   return n <= 1 ? { when: cap(rel), sub: date, days: n } : { when: cap(date), sub: rel, days: n };
 }
 
+// The next pickup for the hero: when, and which bins (all bins sharing the earliest date)
+function nextPickup(a: Addr, ctx: Ctx) {
+  const bins = a.pickups.map((s) => ({ type: s.attributes.bin_type ?? short(s, a), ...when(s.state, ctx) }))
+    .filter((b) => b.days != null).sort((x, y) => x.days! - y.days!);
+  if (!bins.length) return null;
+  const first = bins.filter((b) => b.days === bins[0].days);
+  return { when: first[0].when, sub: first[0].sub, types: first.map((b) => b.type) };
+}
+
+// The panel's own mark: a leaf over a bin lid
+function Logo() {
+  return (
+    <svg className="logo" viewBox="0 0 34 34" aria-hidden="true">
+      <rect width="34" height="34" rx="10" fill="rgba(255,255,255,.14)" />
+      <path d="M9 14h16l-1.6 12.2a2 2 0 0 1-2 1.8h-8.8a2 2 0 0 1-2-1.8z" fill="#fff" opacity=".92" />
+      <rect x="7.5" y="11" width="19" height="3" rx="1.5" fill="#fff" />
+      <path d="M17 9.5c0-3.6 2.6-5.6 6.4-5.5.2 3.8-1.9 6.2-5.6 6.2" fill="#7dffb8" />
+      <path d="M14.5 17.5v7M19.5 17.5v7" stroke="#17694a" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
   const [lang, setLangState] = useState<string | null>(() => localStorage.getItem("vm_lang"));
   const setLang = (x: string | null) => { setLangState(x); x ? localStorage.setItem("vm_lang", x) : localStorage.removeItem("vm_lang"); };
@@ -92,28 +142,69 @@ export default function App({ hass, narrow }: { hass: any; narrow: boolean }) {
   const a = list.find((x) => x.id === sel) ?? list[0];
   const ctx = { hass, t, locale };
   const go = (x: Tab) => { setTab(x); localStorage.setItem("vm_tab", x); };
+  const lg = useLogin(a?.entryId, hass);
+  const li = loginInfo(a, locale);
+  const admin = hass.user?.is_admin !== false;
+  // one login dialog for the whole panel: the header chip, the overview banner and Settings all open it
+  const onLogin = admin && a?.entryId ? lg.start : undefined;
+  // light / dark / auto, remembered per browser (like the language)
+  const [theme, setThemeState] = useState<Theme>(() => {
+    try { return (localStorage.getItem("vm_theme") as Theme) || "auto"; } catch { return "auto"; }
+  });
+  const setTheme = (x: Theme) => {
+    setThemeState(x);
+    try { x === "auto" ? localStorage.removeItem("vm_theme") : localStorage.setItem("vm_theme", x); } catch { /* private mode */ }
+  };
+
+  // its own light/dark look: "auto" follows Home Assistant's dark mode (or the system's when HA doesn't say)
+  const sysDark = hass.themes?.darkMode ?? window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  const dark = theme === "auto" ? sysDark : theme === "dark";
+  const nx = a ? nextPickup(a, ctx) : null;
 
   return (
-    <div className={`page ${narrow ? "narrow" : ""}`}>
-      <header>
-        <div className="brand"><h1>{t.title}</h1>
-          {list.length > 1 ? (
-            <div className="seg">{list.map((x) => (
-              <button key={x.id} className={x.id === a?.id ? "on" : ""} onClick={() => { setSel(x.id); localStorage.setItem("vm_addr", x.id); }}>{x.name}</button>
-            ))}</div>
-          ) : a && <span className="chip">{a.name}</span>}
+    <div className={`page ${narrow ? "narrow" : ""} ${dark ? "dark" : ""}`}>
+      <header className="hero">
+        <div className="wrap">
+          <div className="hero-top">
+            <div className="brand"><Logo /><span className="brand-name">{t.title}<small>{t.tagline}</small></span></div>
+            <div className="hero-actions">
+              <nav className="tabs">
+                {TABS.map((x) => <button key={x} className={tab === x ? "on" : ""} onClick={() => go(x)}>{t[`tab_${x}`]}</button>)}
+              </nav>
+              <button className="theme-btn" onClick={() => setTheme(dark ? "light" : "dark")}
+                title={dark ? t.theme_light : t.theme_dark} aria-label={dark ? t.theme_light : t.theme_dark}>
+                {dark ? "☀️" : "🌙"}
+              </button>
+            </div>
+          </div>
+          {a && <div className="hero-main">
+            <div>
+              <div className="hero-kicker">{t.next}</div>
+              <div className="hero-title">{nx?.when ?? "–"}{nx && nx.types.length > 0 && <span className="types">{nx.types.join(" · ")}</span>}</div>
+              {nx?.sub && <div className="hero-sub">{nx.sub}</div>}
+            </div>
+            <div className="hero-side">
+              {list.length > 1 ? (
+                <div className="seg">{list.map((x) => (
+                  <button key={x.id} className={x.id === a.id ? "on" : ""} onClick={() => { setSel(x.id); localStorage.setItem("vm_addr", x.id); }}>{x.name}</button>
+                ))}</div>
+              ) : <span className="chip">📍 {a.name}</span>}
+              <AccountChip li={li} t={t} onClick={() => (li.state === "ok" || !onLogin ? go("settings") : onLogin())} />
+            </div>
+          </div>}
         </div>
-        <nav className="tabs">
-          {TABS.map((x) => <button key={x} className={tab === x ? "on" : ""} onClick={() => go(x)}>{t[`tab_${x}`]}</button>)}
-        </nav>
       </header>
-      {!a ? <div className="card">{hass.entities ? t.none : t.loading}</div> : (
-        <>
-          {tab === "overview" && <Overview {...ctx} a={a} />}
-          {tab === "invoices" && <Invoices {...ctx} a={a} />}
-          {tab === "settings" && <Settings {...ctx} a={a} lang={lang} setLang={setLang} />}
-        </>
-      )}
+      <main className="wrap">
+        {!a ? <div className="card">{hass.entities ? t.none : t.loading}</div> : (
+          <>
+            <LoginBanner li={li} t={t} onLogin={onLogin} />
+            {tab === "overview" && <Overview {...ctx} a={a} />}
+            {tab === "invoices" && <Invoices {...ctx} a={a} />}
+            {tab === "settings" && <Settings {...ctx} a={a} li={li} onLogin={onLogin} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} />}
+          </>
+        )}
+      </main>
+      {lg.login && <LoginModal lg={lg} t={t} />}
     </div>
   );
 }
@@ -128,6 +219,7 @@ function Overview({ a, ...ctx }: Ctx & { a: Addr }) {
   const next = scene.filter((b) => b.next);
   const tonight = scene.filter((b) => b.days === 1), now = scene.filter((b) => b.days === 0);
   const inv = a.invoice?.attributes.invoices?.[0] as Invoice | undefined;
+  const autogiro = a.property?.attributes.autogiro === true;
   const sorted = [...scene].sort((x, y) => (x.days ?? 1e9) - (y.days ?? 1e9));
 
   return (
@@ -149,8 +241,8 @@ function Overview({ a, ...ctx }: Ctx & { a: Addr }) {
         </div>
         <div className="side">
           <div className="card">
-            <div className="label">{t.next}</div>
-            <div className="big">{next[0]?.when ?? "–"} <small>{next[0]?.sub}</small></div>
+            {/* the next pickup itself is the hero's headline; this card lists them all */}
+            <h2 style={{ marginBottom: 8 }}>{t.upcoming}</h2>
             <table>
               <tbody>{sorted.map((b) => (
                 <tr key={b.type} className={b.next ? "next" : ""}>
@@ -167,7 +259,11 @@ function Overview({ a, ...ctx }: Ctx & { a: Addr }) {
               {inv && <div className="stat">
                 <div className="label">{t.latest_invoice}</div>
                 <div className="value">{fmt(inv.amount, 0, "kr")}</div>
-                <div className="muted"><Status inv={inv} t={t} /> · {inv.invoice_date ? day(inv.invoice_date).toLocaleDateString(locale) : ""}</div>
+                <div className="stat-sub">
+                  <Status inv={inv} t={t} />
+                  <span className="muted">{dueText(inv, t, locale)}</span>
+                  {autogiro && <span className="pill accent">{t.autogiro}</span>}
+                </div>
               </div>}
               {a.fees.length > 0 && <div className="stat">
                 <div className="label">{t.annual_fee}</div>
@@ -178,6 +274,10 @@ function Overview({ a, ...ctx }: Ctx & { a: Addr }) {
                     {f.attributes.pickups_per_year && <span className="muted">{f.attributes.pickups_per_year} {t.per_year}</span>}
                   </div>
                 ))}
+                {a.fees.length > 1 && <div className="fee total">
+                  <span>{t.total}</span>
+                  <b>{fmt(a.fees.reduce((sum, f) => sum + (Number(f.state) || 0), 0), 0, a.fees[0].attributes.unit_of_measurement)}</b>
+                </div>}
               </div>}
             </div>
           )}
@@ -216,7 +316,34 @@ function Invoices({ a, hass, t, locale }: Ctx & { a: Addr }) {
     } catch (e: any) { w?.close(); setErr(`${t.download_failed}: ${e?.message ?? e}`); }
   };
 
+  const unpaid = invoices.filter((i) => !isPaid(i));
+  const toPay = unpaid.reduce((sum, i) => sum + (i.amount ?? 0), 0);
+  const nextDue = unpaid.filter((i) => i.due_date).sort((x, y) => x.due_date!.localeCompare(y.due_date!))[0];
+  const autogiro = a.property?.attributes.autogiro;
+  const thisYear = years[todayIso().slice(0, 4)] ?? 0;
+
   return (
+    <>
+    <div className="kpis">
+      <div className="stat">
+        <div className="label">{t.unpaid_total}</div>
+        <div className={`value ${unpaid.length ? "" : "pos"}`}>{unpaid.length ? fmt(toPay, 0, "kr") : t.all_paid}</div>
+        {unpaid.length > 0 && <div className="muted">{unpaid.length} × {t.unpaid.toLowerCase()}</div>}
+      </div>
+      <div className="stat">
+        <div className="label">{t.next_due}</div>
+        <div className="value">{nextDue ? d(nextDue.due_date) : "–"}</div>
+        {nextDue && <div className="muted">{dueText(nextDue, t, locale)}</div>}
+      </div>
+      <div className="stat">
+        <div className="label">{t.this_year}</div>
+        <div className="value">{fmt(thisYear, 0, "kr")}</div>
+      </div>
+      {autogiro != null && <div className="stat">
+        <div className="label">{t.payment}</div>
+        <div className="value">{autogiro ? t.autogiro : t.by_invoice}</div>
+      </div>}
+    </div>
     <div className="grid-overview">
       <div className="card">
         <h2>{t.invoices}</h2>
@@ -241,18 +368,21 @@ function Invoices({ a, hass, t, locale }: Ctx & { a: Addr }) {
         ))}
       </div>
     </div>
+    </>
   );
 }
 
 /* ---------------- Settings ---------------- */
-function Settings({ a, hass, t, lang, setLang }: Ctx & { a: Addr; lang: string | null; setLang: (x: string | null) => void }) {
+function Settings({ a, hass, t, li, onLogin, lang, setLang, theme, setTheme }:
+  Ctx & { a: Addr; li: LoginInfo; onLogin?: () => void; lang: string | null; setLang: (x: string | null) => void;
+    theme: Theme; setTheme: (x: Theme) => void }) {
   return (
     <div className="settings-grid">
+      <Account li={li} t={t} onLogin={onLogin} />
       {/* keyed by entry: switching address starts fresh, so one address's list can't be saved to another */}
-      <Account key={`acc-${a.entryId}`} a={a} hass={hass} t={t} />
       <Recipients key={`rec-${a.entryId}`} a={a} hass={hass} t={t} />
       <div className="card">
-        <h2>{t.language}</h2>
+        <h2>{t.appearance}</h2>
         <label className="row">
           <span>{t.language}</span>
           <select value={lang ?? ""} onChange={(e) => setLang(e.target.value || null)}>
@@ -260,6 +390,17 @@ function Settings({ a, hass, t, lang, setLang }: Ctx & { a: Addr; lang: string |
             {Object.entries(LANGS).map(([code, [, , name]]) => <option key={code} value={code}>{name}</option>)}
           </select>
         </label>
+        <div className="row">
+          <span>{t.theme}</span>
+          <div className="seg">
+            {(["auto", "light", "dark"] as const).map((x) => (
+              <button key={x} className={theme === x ? "on" : ""} onClick={() => setTheme(x)}>
+                {x === "auto" ? t.theme_auto : x === "light" ? `☀️ ${t.theme_light}` : `🌙 ${t.theme_dark}`}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="muted">{t.theme_info}</div>
       </div>
       {a.switches.length > 0 && <div className="card">
         <h2>{t.notifications}</h2>
@@ -285,66 +426,103 @@ function Settings({ a, hass, t, lang, setLang }: Ctx & { a: Addr; lang: string |
   );
 }
 
-/* ---------------- BankID login ---------------- */
-type Login = { status: "waiting" | "done" | "failed" | "none"; qr?: string | null; autostart?: string | null; autostart_desktop?: string | null };
+/* ---------------- Mina sidor login (BankID) ---------------- */
+type Login = { status: "waiting" | "done" | "failed" | "none"; hint?: string | null; qr?: string | null; autostart?: string | null; autostart_desktop?: string | null };
 // BankID wants its universal link (https://app.bankid.com) on phones and tablets and bankid:/// on a computer.
 // iPadOS reports itself as a Mac, so a touch screen on a "Mac" counts as a tablet.
 const MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
-function Account({ a, hass, t }: { a: Addr; hass: any; t: T }) {
+type LoginCtl = { login: Login | null; err: string | null; start: () => void; close: () => void };
+function useLogin(entryId: string | undefined, hass: any): LoginCtl {
   const [login, setLogin] = useState<Login | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const admin = hass.user?.is_admin !== false;
-  // The "BankID connected" sensor exists once BankID was ever set up and is off while the backend rejects
-  // the session; unavailable/unknown only means a refresh failed (e.g. the backend is down), not an expiry.
-  const connected = a.bankid?.state === "on";
-  const [cls, text] = !a.bankid ? ["", t.bankid_none] : connected ? ["pos", t.bankid_ok]
-    : a.bankid.state === "off" ? ["warn", t.bankid_expired] : ["", t.bankid_unknown];
-
-  const send = (type: string) => hass.connection.sendMessagePromise({ type, entry_id: a.entryId });
+  const send = (type: string) => hass.connection.sendMessagePromise({ type, entry_id: entryId });
   useEffect(() => {
     if (login?.status !== "waiting") return;
-    const id = setInterval(() => send("vafabmiljo/login/status").then(setLogin).catch(() => undefined), 2000);
+    // the QR is animated (a new one every couple of seconds), so keep it fresh
+    const id = setInterval(() => send("vafabmiljo/login/status").then(setLogin).catch(() => undefined), 1500);
     return () => clearInterval(id);
-  }, [login?.status]);
+  }, [login?.status, entryId]);
   const start = async () => {
     setErr(null);
-    try { setLogin(await send("vafabmiljo/login/start")); } catch (e: any) { setErr(e?.message ?? String(e)); }
+    setLogin({ status: "waiting" });
+    try { setLogin(await send("vafabmiljo/login/start")); } catch (e: any) { setLogin({ status: "failed" }); setErr(e?.message ?? String(e)); }
   };
-  const close = () => { if (login?.status === "waiting") send("vafabmiljo/login/cancel").catch(() => undefined); setLogin(null); };
+  const close = () => { if (login?.status === "waiting") send("vafabmiljo/login/cancel").catch(() => undefined); setLogin(null); setErr(null); };
+  return { login, err, start, close };
+}
 
+function LoginModal({ lg, t }: { lg: LoginCtl; t: T }) {
+  const { login, err, start, close } = lg;
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [login?.status]);
+  if (!login) return null;
+  const href = MOBILE ? login.autostart : login.autostart_desktop ?? login.autostart;
+  // on a phone the same-device button comes first and is the primary one; the QR is for another device
+  const open = href && <a className={MOBILE ? "btn primary wide" : "btn wide"} href={href}>{t.open_on_device}</a>;
+  return (
+    <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+      <div className="modal card login" role="dialog" aria-modal="true" aria-label={t.login}>
+        <div className="login-head"><span className="bankid-mark" aria-hidden="true">iD</span><h2>{t.login}</h2></div>
+        <div className="muted">Mina sidor · VafabMiljö</div>
+        {login.status === "waiting" && <>
+          {MOBILE && open}
+          <div className="qr-wrap">
+            {login.qr ? <img className="qr" src={login.qr} alt="BankID QR" /> : <div className="qr skeleton" />}
+          </div>
+          <div className="muted">{t.scan_qr}</div>
+          {!MOBILE && open}
+        </>}
+        {login.status === "done" && <div className="login-result pos">✓ {t.login_done}</div>}
+        {(login.status === "failed" || login.status === "none") && <div className="login-result neg">{t.login_failed}</div>}
+        {err && <div className="neg">{err}</div>}
+        <div className="modal-actions">
+          <span style={{ flex: 1 }} />
+          {login.status === "failed" && <button className="btn" onClick={start}>{t.relogin}</button>}
+          <button className={`btn ${login.status === "done" ? "primary" : ""}`} onClick={close}>{login.status === "done" ? "OK" : t.cancel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Header chip: the login at a glance; clicking it logs in (or opens Settings when all is well).
+function AccountChip({ li, t, onClick }: { li: LoginInfo; t: T; onClick: () => void }) {
+  if (li.state === "unknown") return null;
+  const cls = li.state === "ok" ? "ok" : li.state === "expiring" ? "warn" : "bad";
+  const text = li.state === "ok" || li.state === "expiring" ? leftText(li, t) : li.state === "expired" ? t.relogin : t.login_out;
+  return <button className={`acct ${cls}`} onClick={onClick} title={li.until ? t.login_valid_until.replace("{when}", li.until) : undefined}>
+    <span className="acct-dot" />{text}
+  </button>;
+}
+
+// Shown on every tab when the login needs attention: never done, run out, or running out within two days.
+function LoginBanner({ li, t, onLogin }: { li: LoginInfo; t: T; onLogin?: () => void }) {
+  if (li.state === "ok" || li.state === "unknown") return null;
+  const text = li.state === "expiring" ? t.login_expiring.replace("{when}", li.until) : li.state === "expired" ? t.bankid_expired : t.login_needed;
+  return (
+    <div className={`banner action ${li.state === "expiring" ? "warn" : "bad"}`}>
+      <span>{li.state === "expiring" ? "⏳" : "🔑"} {text}</span>
+      {onLogin && <button className="btn primary" onClick={onLogin}>{li.state === "none" ? t.login : t.relogin}</button>}
+    </div>
+  );
+}
+
+function Account({ li, t, onLogin }: { li: LoginInfo; t: T; onLogin?: () => void }) {
+  // The "BankID connected" sensor exists once a login was ever made and is off while it has run out;
+  // unavailable/unknown only means a refresh failed (e.g. VafabMiljö is down), not an expiry.
+  const [cls, text] = li.state === "none" ? ["", t.bankid_none] : li.state === "ok" || li.state === "expiring"
+    ? [li.state === "ok" ? "pos" : "warn", t.bankid_ok] : li.state === "expired" ? ["warn", t.bankid_expired] : ["", t.bankid_unknown];
   return (
     <div className="card">
       <h2>{t.account}</h2>
       <div className={`muted ${cls}`} style={{ margin: "6px 0" }}>{text}</div>
-      {err && <div className="neg">{err}</div>}
-      {admin ? <button className="btn primary" disabled={!a.entryId} onClick={start}>{connected ? t.relogin : t.login}</button>
+      {li.until && <div className="muted">{t.login_valid_until.replace("{when}", li.until)}</div>}
+      {onLogin ? <button className="btn primary" onClick={onLogin}>{li.state === "none" ? t.login : t.relogin}</button>
         : <div className="muted">{t.admin_only}</div>}
-      {login && (
-        <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && close()}>
-          <div className="modal card login" role="dialog" aria-modal="true" aria-label={t.login}>
-            <h2>{t.login}</h2>
-            {login.status === "waiting" && (() => {
-              const href = MOBILE ? login.autostart : login.autostart_desktop ?? login.autostart;
-              // on a phone the same-device button comes first and is the primary one; the QR is for another device
-              const open = href && <a className={MOBILE ? "btn primary" : "btn"} href={href}>{t.open_on_device}</a>;
-              return <>
-                {MOBILE && open}
-                <div className="muted">{t.scan_qr}</div>
-                {login.qr && <img className="qr" src={login.qr} alt="BankID QR" />}
-                {!MOBILE && open}
-              </>;
-            })()}
-            {login.status === "done" && <div className="pos">✓ {t.login_done}</div>}
-            {(login.status === "failed" || login.status === "none") && <div className="neg">{t.login_failed}</div>}
-            <div className="modal-actions">
-              <span style={{ flex: 1 }} />
-              {login.status === "failed" && <button className="btn" onClick={start}>{t.relogin}</button>}
-              <button className="btn" onClick={close}>{login.status === "done" ? "OK" : t.cancel}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
