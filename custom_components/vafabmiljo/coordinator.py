@@ -10,12 +10,19 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import VafabMiljoAuthError, VafabMiljoClient, VafabMiljoError
-from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES, DOMAIN
+from .const import (
+    CONF_SCAN_INTERVAL,
+    CONF_SESSION_COOKIE,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
+    DOMAIN,
+    KEEP_ALIVE_INTERVAL_SECONDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -140,6 +147,52 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
         # that build a coordinator directly).
         self.invoice_notifier: Any = None
         self.reminders: Any = None  # reminders.VafabMiljoNotifier, set by __init__
+        # The entry as this coordinator was built from it, plus the cookies it saved itself since. An
+        # update that differs from this came from elsewhere (options, a login, a reauth) and reloads
+        # the entry; saving a rotated cookie must not (see is_own_entry_update).
+        self._entry_data = dict(entry.data)
+        self._entry_options = dict(entry.options)
+
+    # -- Keeping the BankID session alive ------------------------------------------
+
+    @callback
+    def async_start_keep_alive(self) -> CALLBACK_TYPE:
+        """Ping keep-alive between refreshes; the returned callback stops it."""
+        return async_track_time_interval(
+            self.hass,
+            self._async_keep_alive,
+            timedelta(seconds=KEEP_ALIVE_INTERVAL_SECONDS),
+            name=f"{DOMAIN} BankID keep-alive",
+        )
+
+    async def _async_keep_alive(self, _now: Any = None) -> None:
+        if not self.client.session_cookie or self.data is None or self.data.session_expired:
+            return  # no session to keep, or already expired: a new login reloads the entry
+        try:
+            await self.client.keep_alive()
+        except VafabMiljoAuthError:
+            # handled in one place: the refresh raises the repair, starts reauth and marks it expired
+            await self.async_refresh()
+            return
+        except VafabMiljoError as err:
+            _LOGGER.debug("BankID keep-alive failed, retrying at the next one: %s", err)
+            return
+        self._persist_session_cookie()
+
+    @callback
+    def _persist_session_cookie(self) -> None:
+        """Save a cookie the backend rotated, so a restart resumes the live session, not an older one."""
+        cookie = self.client.session_cookie
+        if not cookie or cookie == self.entry.data.get(CONF_SESSION_COOKIE):
+            return
+        if dict(self.entry.data) != self._entry_data:
+            return  # a login or reauth just saved its own session; the reload it triggers takes it from there
+        self._entry_data = {**self._entry_data, CONF_SESSION_COOKIE: cookie}
+        self.hass.config_entries.async_update_entry(self.entry, data=self._entry_data)
+
+    def is_own_entry_update(self, entry: ConfigEntry) -> bool:
+        """Whether the entry only changed by this coordinator saving a rotated cookie (no reload needed)."""
+        return dict(entry.data) == self._entry_data and dict(entry.options) == self._entry_options
 
     async def _async_update_data(self) -> VafabMiljoData:
         try:
@@ -171,6 +224,7 @@ class VafabMiljoCoordinator(DataUpdateCoordinator[VafabMiljoData]):
             )
             return VafabMiljoData(pickups=pickups, authenticated=True, session_expired=True)
         ir.async_delete_issue(self.hass, DOMAIN, bankid_issue_id(self.entry.entry_id))
+        self._persist_session_cookie()
         return data
 
     async def _async_fetch_account(self, pickups: list[dict[str, Any]]) -> VafabMiljoData:

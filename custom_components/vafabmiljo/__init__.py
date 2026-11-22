@@ -6,7 +6,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import VafabMiljoClient
 from .const import CONF_DEVICE_BEARER, CONF_DEVICE_UUID, CONF_SESSION_COOKIE, DOMAIN
@@ -16,12 +15,13 @@ from .login import async_cancel_login
 from .panel import async_register_panel, async_unregister_panel
 from .reminders import VafabMiljoNotifier, async_setup_websocket, store_for
 from .services import async_setup_services
+from .session import async_create_session
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.CALENDAR, Platform.SENSOR, Platform.SWITCH, Platform.TIME]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    session = async_get_clientsession(hass)
+    session = async_create_session(hass)
     client = VafabMiljoClient(
         session,
         entry.data[CONF_DEVICE_UUID],
@@ -38,6 +38,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_register_panel(hass, entry.entry_id)
     async_setup_websocket(hass)
     entry.async_on_unload(lambda: async_cancel_login(hass, entry.entry_id))
+    if client.session_cookie:
+        # between the (by default 30-minute) refreshes, so the BankID session doesn't time out
+        entry.async_on_unload(coordinator.async_start_keep_alive())
     # Per-recipient notifications configured in the panel (reminders.py).
     coordinator.reminders = VafabMiljoNotifier(hass, entry, coordinator)
     entry.async_on_unload(coordinator.reminders.async_unload)
@@ -72,7 +75,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # The scan-interval option only takes effect on the coordinator at
-    # construction time, so a change needs a full reload to apply.
+    # construction time, so a change needs a full reload to apply. So does a
+    # new session cookie from a login or reauth - but not the coordinator
+    # saving a cookie the backend rotated on the session it already uses.
+    coordinator = getattr(entry, "runtime_data", None)
+    if isinstance(coordinator, VafabMiljoCoordinator) and coordinator.is_own_entry_update(entry):
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

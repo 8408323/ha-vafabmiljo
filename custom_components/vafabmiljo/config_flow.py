@@ -35,7 +35,6 @@ from urllib.parse import quote
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig
 
 from .api import VafabMiljoClient, VafabMiljoError, VafabMiljoTimeoutError
@@ -53,6 +52,7 @@ from .const import (
     DEVICE_AUTH_KEY,
     DOMAIN,
 )
+from .session import async_create_session
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._device_uuid = str(uuid.uuid4()).replace("-", "")
             self._device_bearer = DEVICE_AUTH_KEY
-            session = async_get_clientsession(self.hass)
+            session = async_create_session(self.hass)
             self._client = VafabMiljoClient(session, self._device_uuid, self._device_bearer)
             try:
                 await self._client.register(model="Home Assistant", os_version="n/a")
@@ -273,7 +273,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         entry = self._get_reauth_entry()
         if self._client is None:
-            session = async_get_clientsession(self.hass)
+            session = async_create_session(self.hass)
             self._client = VafabMiljoClient(
                 session,
                 entry.data[CONF_DEVICE_UUID],
@@ -311,7 +311,7 @@ class VafabMiljoConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if self._client is None:
-            session = async_get_clientsession(self.hass)
+            session = async_create_session(self.hass)
             self._client = VafabMiljoClient(
                 session,
                 entry.data[CONF_DEVICE_UUID],

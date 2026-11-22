@@ -45,7 +45,7 @@ async def test_setup_entry_creates_coordinator_and_forwards_platforms(monkeypatc
     # anonymous entry: no BankID, no invoices, no notifier
     assert entry.runtime_data.invoice_notifier is None
     hass.config_entries.async_forward_entry_setups.assert_awaited_once()
-    assert len(entry._unload_callbacks) == 3  # panel login + reminders + update listener
+    assert len(entry._unload_callbacks) == 4  # panel login + keep-alive + reminders + update listener
     entry._unload_callbacks[0]()  # cancelling a login when none runs is a no-op
 
 
@@ -64,8 +64,9 @@ async def test_setup_entry_creates_notifier_for_authenticated_entry(monkeypatch)
     notifier = entry.runtime_data.invoice_notifier
     assert notifier is not None
     # unload is wired through the entry's own hooks (update listener + notifier)
-    assert len(entry._unload_callbacks) == 4  # panel login + reminders + invoice notifier + update listener
-    assert entry._unload_callbacks[2] == notifier.async_unload
+    # panel login + keep-alive + reminders + invoice notifier + update listener
+    assert len(entry._unload_callbacks) == 5
+    assert entry._unload_callbacks[3] == notifier.async_unload
 
 
 async def test_reload_entry_calls_hass_reload():
@@ -185,3 +186,91 @@ async def test_download_service_is_registered_before_the_notifier_can_fire(monke
     await async_setup_entry(hass, _entry())
 
     assert seen["service_registered"] is True
+
+
+async def test_setup_uses_a_session_without_cookie_jar(monkeypatch):
+    """HA's shared session has one cookie jar for everyone, and a jar cookie overrides the
+    vafab_session header the client sends - another entry or login could replace this entry's
+    BankID session. The entry gets its own session that keeps no cookies at all."""
+    from aiohttp import DummyCookieJar
+    from vafabmiljo.coordinator import VafabMiljoData
+
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=True)
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
+    hass = _hass()
+    await async_setup_entry(hass, _entry())
+
+    (kwargs,) = hass.data["created_sessions"]
+    assert isinstance(kwargs["cookie_jar"], DummyCookieJar)
+
+
+async def test_setup_keeps_the_bankid_session_alive_between_refreshes(monkeypatch):
+    from vafabmiljo.const import KEEP_ALIVE_INTERVAL_SECONDS
+    from vafabmiljo.coordinator import VafabMiljoData
+
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=True)
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
+    hass = _hass()
+    entry = _entry()
+    await async_setup_entry(hass, entry)
+
+    ((action, interval),) = hass.interval_listeners
+    assert interval.total_seconds() == KEEP_ALIVE_INTERVAL_SECONDS
+    assert interval.total_seconds() < entry.runtime_data.update_interval.total_seconds()
+    entry._unload_callbacks[1]()  # unloading stops it
+    assert hass.interval_listeners == []
+
+
+async def test_setup_without_bankid_has_no_keep_alive(monkeypatch):
+    from vafabmiljo.coordinator import VafabMiljoData
+
+    async def _refresh(self):
+        self.data = VafabMiljoData(pickups=[], authenticated=False)
+
+    monkeypatch.setattr(VafabMiljoCoordinator, "async_config_entry_first_refresh", _refresh)
+    hass = _hass()
+    entry = ConfigEntry(data={CONF_DEVICE_UUID: "dev1", CONF_DEVICE_BEARER: "bearer1"})
+    await async_setup_entry(hass, entry)
+
+    assert hass.interval_listeners == []
+
+
+async def test_saving_a_rotated_cookie_does_not_reload():
+    hass = _hass()
+    entry = _entry()
+    coordinator = VafabMiljoCoordinator(hass, entry, AsyncMock())
+    entry.runtime_data = coordinator
+    coordinator.client.session_cookie = "cookie2"
+    hass.config_entries.async_update_entry = lambda e, *, data: setattr(e, "data", data)
+
+    coordinator._persist_session_cookie()
+    await _async_reload_entry(hass, entry)
+
+    assert entry.data[CONF_SESSION_COOKIE] == "cookie2"
+    hass.config_entries.async_reload.assert_not_awaited()
+
+
+async def test_a_new_login_cookie_still_reloads():
+    hass = _hass()
+    entry = _entry()
+    entry.runtime_data = VafabMiljoCoordinator(hass, entry, AsyncMock())
+    entry.data = {**entry.data, CONF_SESSION_COOKIE: "from-a-login"}
+
+    await _async_reload_entry(hass, entry)
+
+    hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_an_options_change_still_reloads():
+    hass = _hass()
+    entry = _entry()
+    entry.runtime_data = VafabMiljoCoordinator(hass, entry, AsyncMock())
+    entry.options = {"scan_interval": 60}
+
+    await _async_reload_entry(hass, entry)
+
+    hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
