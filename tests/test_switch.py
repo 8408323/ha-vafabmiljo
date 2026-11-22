@@ -72,3 +72,14 @@ async def test_unavailable_while_the_session_is_expired_and_follows_the_coordina
     assert entity.available is False
     listener()  # a coordinator update rewrites the state
     assert entity.state_writes == 1
+
+
+async def test_an_unavailable_restored_state_keeps_the_default_on():
+    # saved while the BankID session was expired: must not restore as off
+    coordinator = _coordinator(authenticated=True)
+    switch = VafabMiljoNotificationSwitch(coordinator, _entry(), "garbage", "garbage")
+    switch.async_get_last_state = AsyncMock(return_value=SimpleNamespace(state="unavailable"))
+
+    await switch.async_added_to_hass()
+
+    assert switch.is_on is True

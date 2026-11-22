@@ -20,7 +20,7 @@ from datetime import time
 
 from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -31,6 +31,21 @@ from .invoices import VafabMiljoInvoiceNotifier
 
 DEFAULT_REMINDER_TIME = time(19, 0)  # matches the backend's own default for a new device
 DEFAULT_NOTIFY_TIME = time(18, 0)
+
+
+def _restored_time(last_state: State | None) -> time | None:
+    """The time a restored state holds, or None for unavailable/unknown/garbage.
+
+    The reminder time is unavailable while the BankID session is expired, and HA saves that as the
+    state to restore - parsing it raised in async_added_to_hass, so the entity was never added and
+    stayed unavailable for good, even after a new login.
+    """
+    if last_state is None:
+        return None
+    try:
+        return time.fromisoformat(last_state.state)
+    except ValueError:
+        return None
 
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -73,8 +88,8 @@ class VafabMiljoReminderTimeEntity(TimeEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.async_on_remove(self._coordinator.async_add_listener(self.async_write_ha_state))
-        if (last_state := await self.async_get_last_state()) is not None:
-            self._attr_native_value = time.fromisoformat(last_state.state)
+        if (restored := _restored_time(await self.async_get_last_state())) is not None:
+            self._attr_native_value = restored
 
     async def async_set_value(self, value: time) -> None:
         await self._coordinator.client.update_settings({REMINDER_TIME_FIELD: value.strftime("%H:%M")})
@@ -100,8 +115,8 @@ class VafabMiljoNotifyTimeEntity(TimeEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if (last_state := await self.async_get_last_state()) is not None:
-            self._attr_native_value = time.fromisoformat(last_state.state)
+        if (restored := _restored_time(await self.async_get_last_state())) is not None:
+            self._attr_native_value = restored
 
     async def async_set_value(self, value: time) -> None:
         self._attr_native_value = value

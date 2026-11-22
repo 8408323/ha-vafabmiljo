@@ -43,6 +43,8 @@ def _install_stub_homeassistant() -> None:
 
     const.Platform = Platform
     const.EntityCategory = EntityCategory
+    const.STATE_ON = "on"
+    const.STATE_OFF = "off"
     sys.modules["homeassistant.const"] = const
 
     # -- homeassistant.core ----------------------------------------------------
@@ -158,6 +160,7 @@ def _install_stub_homeassistant() -> None:
     core.Event = Event
     core.CoreState = CoreState
     core.callback = callback
+    core.State = type("State", (), {})
     core.ServiceCall = ServiceCall
     core.ServiceResponse = ServiceResponse
     core.SupportsResponse = SupportsResponse
